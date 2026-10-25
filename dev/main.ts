@@ -57,6 +57,8 @@ function buildHass(): HomeAssistant {
     async callService(domain, service, data) {
       log.unshift(`${domain}.${service} ${JSON.stringify(data ?? {})}`);
       log.length = Math.min(log.length, 12);
+      const patch = scene.service?.(domain, service, data ?? {}, values);
+      if (patch) values = { ...values, ...patch };
       update();
       if (failServices) throw new Error("mock failure");
     },

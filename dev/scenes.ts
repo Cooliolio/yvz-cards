@@ -20,6 +20,13 @@ export interface Scene {
   config: Record<string, unknown>;
   controls: Control[];
   states(values: Record<string, ControlValue>): Record<string, HassEntity>;
+  // Lets service calls change the controls, standing in for HA automations.
+  service?(
+    domain: string,
+    service: string,
+    data: Record<string, unknown>,
+    values: Record<string, ControlValue>,
+  ): Record<string, ControlValue> | void;
 }
 
 const entity = (
@@ -234,4 +241,113 @@ const host: Scene = {
   },
 };
 
-export const scenes: Scene[] = [host, stove, gauges];
+const ROOMS = { Badkamer: "badkamer", Kelder: "kelder", Slaapkamer: "slaapkamer", Woonkamer: "woonkamer" };
+const MODES = ["Off", "On", "Eco", "Comfort", "Boost"];
+const NUMBERS: Record<string, string> = {
+  "input_number.heating_target_temp": "target",
+  "input_number.heating_comfort_temp": "comfort",
+  "input_number.heating_eco_temp": "eco",
+  "input_number.heating_frost_temp": "frostTemp",
+  "input_number.heating_boost_minutes": "boostMinutes",
+};
+
+const heating: Scene = {
+  name: "Heating",
+  tag: "yvz-heating-card",
+  width: 440,
+  config: { type: "custom:yvz-heating-card" },
+  controls: [
+    { key: "mode", label: "Mode", type: "select", value: "Comfort", options: MODES },
+    { key: "pump", label: "Pump running", type: "checkbox", value: true },
+    gaugeControl("pumpMinutes", "Pump on for (min)", 25, 0, 240),
+    { key: "offline", label: "Offline", type: "checkbox", value: false },
+    { key: "leading", label: "Leading room", type: "select", value: "Woonkamer", options: Object.keys(ROOMS) },
+    ...Object.entries(ROOMS).map(([name, id]) =>
+      gaugeControl(id, `${name} (°C)`, { badkamer: 20.1, kelder: 6.5, slaapkamer: 17.2, woonkamer: 19.4 }[id]!, 0, 30, 0.1),
+    ),
+    gaugeControl("trend", "Trend (°C/h)", 0.4, -1.5, 1.5, 0.05),
+    gaugeControl("target", "Manual target", 20, 5, 25, 0.5),
+    gaugeControl("comfort", "Comfort", 21, 15, 25, 0.5),
+    gaugeControl("eco", "Eco", 17, 10, 20, 0.5),
+    { key: "frost", label: "Frost protection", type: "checkbox", value: true },
+    gaugeControl("frostTemp", "Frost temp", 7, 5, 10, 0.5),
+    gaugeControl("boostMinutes", "Boost duration", 60, 15, 180, 15),
+    gaugeControl("boostLeft", "Boost left (min)", 45, 0, 180),
+    { key: "beforeBoost", label: "Mode before boost", type: "select", value: "Eco", options: MODES.slice(0, 4) },
+    { key: "noWarmup", label: "No warm-up", type: "checkbox", value: false },
+    { key: "sensorProblem", label: "Sensor problem", type: "checkbox", value: false },
+    { key: "lowBattery", label: "Low battery room", type: "select", value: "none", options: ["none", ...Object.keys(ROOMS)] },
+    { key: "roomDown", label: "Room not reporting", type: "select", value: "none", options: ["none", ...Object.keys(ROOMS)] },
+  ],
+  states(v) {
+    const n = (key: string) => Number(v[key]);
+    const mode = String(v.mode);
+    const setpoint =
+      mode === "On" ? n("target") : mode === "Eco" ? n("eco") : mode === "Off" ? n("frostTemp") : n("comfort");
+    const hvacOff = mode === "Off" && !v.frost;
+    const number = (id: string, value: number, min: number, max: number, step: number, unit = "°C") =>
+      entity(id, String(value), { min, max, step, unit_of_measurement: unit });
+    const roomTemps = Object.entries(ROOMS).map(([name, id]) =>
+      v.roomDown === name
+        ? entity(`sensor.${id}_temperature`, "unavailable")
+        : sensor(`sensor.${id}_temperature`, n(id), "°C", { device_class: "temperature" }),
+    );
+    const leading = ROOMS[v.leading as keyof typeof ROOMS];
+    const list = [
+      entity("climate.heating", v.offline ? "unavailable" : hvacOff ? "off" : "heat", {
+        temperature: hvacOff ? null : setpoint,
+        current_temperature: n(leading),
+        min_temp: 5,
+        max_temp: 25,
+        target_temp_step: 0.5,
+      }),
+      entity("input_select.heating_mode", mode, { options: MODES }),
+      number("input_number.heating_target_temp", n("target"), 5, 25, 0.5),
+      number("input_number.heating_comfort_temp", n("comfort"), 15, 25, 0.5),
+      number("input_number.heating_eco_temp", n("eco"), 10, 20, 0.5),
+      number("input_number.heating_frost_temp", n("frostTemp"), 5, 10, 0.5),
+      number("input_number.heating_boost_minutes", n("boostMinutes"), 15, 180, 15, "min"),
+      entity("input_boolean.heating_frost_enabled", v.frost ? "on" : "off"),
+      entity("timer.heating_boost", mode === "Boost" ? "active" : "idle", {
+        duration: `${Math.floor(n("boostMinutes") / 60)}:${String(n("boostMinutes") % 60).padStart(2, "0")}:00`,
+        finishes_at: mode === "Boost" ? new Date(Date.now() + n("boostLeft") * 60_000).toISOString() : undefined,
+      }),
+      entity("input_text.heating_mode_before_boost", String(v.beforeBoost)),
+      entity("sensor.heating_sensors", String(roomTemps.length), {
+        map: Object.fromEntries(Object.entries(ROOMS).map(([name, id]) => [name, `sensor.${id}_temperature`])),
+      }),
+      entity("input_select.heating_leading_sensor", String(v.leading), { options: Object.keys(ROOMS) }),
+      sensor("sensor.heating_control_temperature", n(leading), "°C", { device_class: "temperature" }),
+      sensor("sensor.heating_trend", n("trend"), "°C/h"),
+      entity(
+        "binary_sensor.heating_pump",
+        v.offline ? "unavailable" : v.pump ? "on" : "off",
+        { device_class: "running" },
+        n("pumpMinutes"),
+      ),
+      entity("binary_sensor.heating_offline", v.offline ? "on" : "off", { device_class: "problem" }),
+      entity("binary_sensor.heating_no_warm_up", v.noWarmup ? "on" : "off", { device_class: "problem" }),
+      entity("binary_sensor.heating_sensor_problem", v.sensorProblem ? "on" : "off", { device_class: "problem" }),
+      entity("binary_sensor.heating_sensor_battery_low", v.lowBattery === "none" ? "off" : "on", {
+        device_class: "battery",
+        low_sensors: v.lowBattery === "none" ? [] : [`${v.lowBattery} (2.1 V)`],
+      }),
+      ...roomTemps,
+    ];
+    return Object.fromEntries(list.map((e) => [e.entity_id, e]));
+  },
+  service(domain, service, data, v): Record<string, ControlValue> | void {
+    const id = String(data.entity_id);
+    if (service === "select_option" && id === "input_select.heating_mode") {
+      const option = String(data.option);
+      return option === "Boost"
+        ? { mode: option, beforeBoost: MODES.slice(0, 4).includes(String(v.mode)) ? v.mode : "On", boostLeft: v.boostMinutes }
+        : { mode: option };
+    }
+    if (service === "select_option" && id === "input_select.heating_leading_sensor") return { leading: String(data.option) };
+    if (domain === "input_number" && NUMBERS[id]) return { [NUMBERS[id]]: Number(data.value) };
+    if (domain === "input_boolean" && service === "toggle") return { frost: !v.frost };
+  },
+};
+
+export const scenes: Scene[] = [host, heating, stove, gauges];
