@@ -85,6 +85,16 @@ const tr: Dictionary = {
   "host.field.warn_at": "Uyarı eşiği",
   "host.field.error_at": "Hata eşiği",
   "host.field.prefix": "Ön ek (örn. jellyfin)",
+  "host.section_usage": "Kullanım",
+  "host.section_io": "Aktarım",
+  "host.ok": "Sorun yok",
+  "host.problem": "Sorun",
+  "host.field.columns": "Sütunlar (boş = otomatik)",
+  "host.field.compact": "Kompakt görünüm",
+  "host.field.icon": "Simge",
+  "host.field.kind": "Tür",
+  "host.kind_vm": "Sanal makine",
+  "host.kind_container": "Konteyner",
 };
 
 export default tr;

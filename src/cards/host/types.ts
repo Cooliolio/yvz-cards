@@ -5,10 +5,16 @@ export interface HostSensor {
   name?: string;
   warn_at?: number;
   error_at?: number;
+  icon?: string;
 }
+
+export const GUEST_KINDS = ["vm", "container"] as const;
+export type GuestKind = (typeof GUEST_KINDS)[number];
 
 export interface HostGuest {
   name?: string;
+  kind?: GuestKind;
+  icon?: string;
   prefix?: string;
   status?: string;
   cpu?: string;
@@ -32,4 +38,6 @@ export interface HostCardConfig extends LovelaceCardConfig {
   stats?: HostSensor[];
   trend?: boolean;
   trend_hours?: number;
+  columns?: number;
+  compact?: boolean;
 }

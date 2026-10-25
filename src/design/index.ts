@@ -8,6 +8,7 @@ export type { GaugeVariant } from "./components/yvz-gauge";
 export { gaugeState } from "./components/yvz-gauge";
 export type { RateSeries } from "./components/yvz-rate";
 export type { StackPart } from "./components/yvz-stack";
+export type { SparkSeries } from "./components/yvz-sparkline";
 
 import "./components/yvz-icon-badge";
 import "./components/yvz-chip";

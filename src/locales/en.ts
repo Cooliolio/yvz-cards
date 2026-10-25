@@ -83,6 +83,16 @@ const en = {
   "host.field.warn_at": "Warn at",
   "host.field.error_at": "Error at",
   "host.field.prefix": "Prefix (e.g. jellyfin)",
+  "host.section_usage": "Usage",
+  "host.section_io": "Throughput",
+  "host.ok": "OK",
+  "host.problem": "Problem",
+  "host.field.columns": "Columns (empty = automatic)",
+  "host.field.compact": "Compact layout",
+  "host.field.icon": "Icon",
+  "host.field.kind": "Type",
+  "host.kind_vm": "Virtual machine",
+  "host.kind_container": "Container",
 };
 
 export type Dictionary = Record<keyof typeof en, string>;

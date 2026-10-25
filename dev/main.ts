@@ -42,15 +42,17 @@ function buildHass(): HomeAssistant {
     formatEntityState: (st) => st.state,
     async callWS<T>(message: Record<string, unknown>): Promise<T> {
       if (message.type !== "history/history_during_period") throw new Error("unsupported");
-      const id = (message.entity_ids as string[])[0];
-      const base = parseFloat(states[id]?.state ?? "0") || 0;
-      const now = Date.now() / 1000;
-      const seed = [...id].reduce((a, c) => a + c.charCodeAt(0), 0);
-      const series = Array.from({ length: 96 }, (_, i) => ({
-        s: String(Math.max(0, base * (1 + 0.25 * Math.sin(i / 6 + seed) + 0.1 * Math.cos(i / 2.3 + seed)))),
-        lu: now - (96 - i) * 900,
-      }));
-      return { [id]: series } as T;
+      const start = Date.parse(message.start_time as string) / 1000;
+      const step = (Date.parse(message.end_time as string) / 1000 - start) / 96;
+      const history = (id: string) => {
+        const base = parseFloat(states[id]?.state ?? "0") || 0;
+        const seed = [...id].reduce((a, c) => a + c.charCodeAt(0), 0);
+        return Array.from({ length: 96 }, (_, i) => ({
+          s: String(Math.max(0, base * (1 + 0.25 * Math.sin(i / 6 + seed) + 0.1 * Math.cos(i / 2.3 + seed)))),
+          lu: start + i * step,
+        }));
+      };
+      return Object.fromEntries((message.entity_ids as string[]).map((id) => [id, history(id)])) as T;
     },
     async callService(domain, service, data) {
       log.unshift(`${domain}.${service} ${JSON.stringify(data ?? {})}`);
@@ -128,7 +130,7 @@ function update(): void {
           </select>
         </label>
         <label>Width: ${width}px
-          <input type="range" min="260" max="760" step="10" .value=${live(String(width))}
+          <input type="range" min="260" max="1400" step="10" .value=${live(String(width))}
             @input=${(e: Event) => { width = Number((e.target as HTMLInputElement).value); update(); }} />
         </label>
         <label class="check"><input type="checkbox" .checked=${failServices}

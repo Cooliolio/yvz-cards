@@ -166,10 +166,10 @@ const host: Scene = {
       { entity: "binary_sensor.pve_backup_status", name: "Backup status" },
     ],
     guests: [
-      { prefix: "haos18_2", name: "HAOS" },
-      { prefix: "octoprint", name: "OctoPrint" },
-      { prefix: "dnd_game", name: "dnd-game" },
-      { prefix: "apiary", name: "apiary" },
+      { prefix: "haos18_2", name: "HAOS", kind: "vm" },
+      { prefix: "octoprint", name: "OctoPrint", kind: "container" },
+      { prefix: "dnd_game", name: "dnd-game", kind: "container" },
+      { prefix: "apiary", name: "apiary", kind: "container" },
     ],
   },
   controls: [

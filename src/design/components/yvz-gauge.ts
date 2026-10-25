@@ -2,6 +2,7 @@ import { css, html, LitElement, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import type { YvzState } from "../palette";
 import { designStyles } from "../styles";
+import { NumberTween } from "../tween";
 
 export type GaugeVariant = "line" | "stat" | "segments";
 
@@ -12,6 +13,12 @@ interface GaugeThresholds {
   warnAt?: number;
   errorAt?: number;
   invert?: boolean;
+}
+
+interface Zone {
+  from: number;
+  to: number;
+  state: "pending" | "error";
 }
 
 // Maps a value to a state; with invert, low values are the bad ones (e.g. battery).
@@ -40,6 +47,9 @@ export class YvzGauge extends LitElement {
   @property({ type: Number }) target?: number;
   @property() display = "";
   @property() tone?: YvzState;
+  @property() icon = "";
+
+  private tween = new NumberTween(this);
 
   static override styles = [
     designStyles,
@@ -47,6 +57,7 @@ export class YvzGauge extends LitElement {
       :host {
         --_tone: var(--yvz-text);
         --_value: var(--yvz-text);
+        --_icon: var(--yvz-text-muted);
         display: block;
         min-width: 0;
       }
@@ -55,16 +66,32 @@ export class YvzGauge extends LitElement {
       :host([data-state="pending"]) {
         --_tone: var(--yvz-pending);
         --_value: var(--yvz-pending-text);
+        --_icon: var(--yvz-pending);
       }
 
       :host([data-state="error"]) {
         --_tone: var(--yvz-error);
         --_value: var(--yvz-error-text);
+        --_icon: var(--yvz-error);
       }
 
       :host([data-state="unavailable"]) {
         --_tone: var(--yvz-text-muted);
         --_value: var(--yvz-text-muted);
+      }
+
+      .name {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+
+      .name ha-icon {
+        --mdc-icon-size: 16px;
+        flex: none;
+        color: var(--_icon);
+        transition: color var(--yvz-duration-base) var(--yvz-ease);
       }
 
       .label {
@@ -91,6 +118,7 @@ export class YvzGauge extends LitElement {
       }
 
       .fill {
+        position: relative;
         height: 100%;
         border-radius: 1px;
         background: var(--_tone);
@@ -120,6 +148,21 @@ export class YvzGauge extends LitElement {
         margin-top: var(--yvz-space-2);
         border-radius: 1px;
         background: var(--yvz-divider);
+      }
+
+      /* faint tint where the warning and error ranges start, so the headroom is visible */
+      .zone {
+        position: absolute;
+        top: 0;
+        height: 100%;
+      }
+
+      .zone.pending {
+        background: var(--yvz-pending-strong);
+      }
+
+      .zone.error {
+        background: var(--yvz-error-strong);
       }
 
       .target {
@@ -153,8 +196,16 @@ export class YvzGauge extends LitElement {
         transition: background var(--yvz-duration-base) var(--yvz-ease);
       }
 
+      .segments i.pending {
+        background: var(--yvz-pending-soft);
+      }
+
+      .segments i.error {
+        background: var(--yvz-error-soft);
+      }
+
       .segments i.lit {
-        background: var(--yvz-state);
+        background: var(--_tone);
       }
     `,
   ];
@@ -173,10 +224,24 @@ export class YvzGauge extends LitElement {
     return Math.min(100, Math.max(0, ((v - this.min) / span) * 100));
   }
 
+  private get zones(): Zone[] {
+    const warn = this.warnAt == null ? undefined : this.position(this.warnAt);
+    const error = this.errorAt == null ? undefined : this.position(this.errorAt);
+    const zones: (Zone | false)[] = this.invert
+      ? [error != null && { from: 0, to: error, state: "error" }, warn != null && { from: error ?? 0, to: warn, state: "pending" }]
+      : [warn != null && { from: warn, to: error ?? 100, state: "pending" }, error != null && { from: error, to: 100, state: "error" }];
+    return zones.filter((z): z is Zone => !!z && z.to > z.from);
+  }
+
+  private zoneAt(pct: number, zones: Zone[]): string {
+    return zones.find((z) => pct >= z.from && pct < z.to)?.state ?? "";
+  }
+
   private get text(): string {
     if (this.display) return this.display;
-    if (!this.available) return "—";
-    return this.value!.toLocaleString(this.locale || undefined, {
+    const shown = this.tween.set(this.value);
+    if (!this.available || shown == null) return "—";
+    return shown.toLocaleString(this.locale || undefined, {
       minimumFractionDigits: this.decimals,
       maximumFractionDigits: this.decimals,
     });
@@ -196,24 +261,38 @@ export class YvzGauge extends LitElement {
     if (this.available) this.setAttribute("aria-valuenow", String(this.value));
   }
 
+  private renderHead() {
+    return html`<div class="head">
+      <span class="name">
+        ${this.icon ? html`<ha-icon .icon=${this.icon}></ha-icon>` : nothing}<span class="label">${this.label}</span>
+      </span>
+      ${this.renderValue()}
+    </div>`;
+  }
+
   protected override render() {
     const pct = this.fraction * 100;
     switch (this.variant) {
       case "stat":
-        return html`<div class="head"><span class="label">${this.label}</span>${this.renderValue()}</div>`;
+        return this.renderHead();
       case "segments": {
         const lit = this.fraction > 0 ? Math.max(1, Math.round(this.fraction * SEGMENTS)) : 0;
+        const zones = this.zones;
         return html`
-          <div class="head"><span class="label">${this.label}</span>${this.renderValue()}</div>
+          ${this.renderHead()}
           <div class="segments">
-            ${Array.from({ length: SEGMENTS }, (_, i) => html`<i class=${i < lit ? "lit" : ""}></i>`)}
+            ${Array.from(
+              { length: SEGMENTS },
+              (_, i) => html`<i class=${i < lit ? "lit" : this.zoneAt(((i + 0.5) / SEGMENTS) * 100, zones)}></i>`,
+            )}
           </div>
         `;
       }
       default:
         return html`
-          <div class="head"><span class="label">${this.label}</span>${this.renderValue()}</div>
+          ${this.renderHead()}
           <div class="line">
+            ${this.zones.map((z) => html`<i class="zone ${z.state}" style="left: ${z.from}%; width: ${z.to - z.from}%"></i>`)}
             <div class="fill" style="width: ${pct}%"></div>
             ${this.target == null
               ? nothing

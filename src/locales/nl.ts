@@ -85,6 +85,16 @@ const nl: Dictionary = {
   "host.field.warn_at": "Waarschuwing bij",
   "host.field.error_at": "Fout bij",
   "host.field.prefix": "Voorvoegsel (bv. jellyfin)",
+  "host.section_usage": "Gebruik",
+  "host.section_io": "Doorvoer",
+  "host.ok": "OK",
+  "host.problem": "Probleem",
+  "host.field.columns": "Kolommen (leeg = automatisch)",
+  "host.field.compact": "Compacte weergave",
+  "host.field.icon": "Pictogram",
+  "host.field.kind": "Type",
+  "host.kind_vm": "Virtuele machine",
+  "host.kind_container": "Container",
 };
 
 export default nl;

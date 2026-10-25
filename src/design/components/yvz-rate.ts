@@ -1,6 +1,7 @@
 import { css, html, LitElement, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { designStyles } from "../styles";
+import { NumberTween } from "../tween";
 
 export interface RateSeries {
   value?: number;
@@ -16,7 +17,10 @@ export class YvzRate extends LitElement {
   @property() label = "";
   @property() locale = "";
   @property({ attribute: false }) series: RateSeries[] = [];
+  // Hide the peak bars, e.g. when a trend line below already shows the same thing.
+  @property({ type: Boolean }) bars = true;
 
+  private tweens: NumberTween[] = [];
   private peak = 0;
   private peakAt = Date.now();
 
@@ -26,16 +30,19 @@ export class YvzRate extends LitElement {
       :host {
         display: block;
         min-width: 0;
+        container-type: inline-size;
       }
 
+      /* values drop below the label instead of squeezing it when the cell is narrow */
       .head {
         display: flex;
+        flex-wrap: wrap;
         align-items: baseline;
-        justify-content: space-between;
-        gap: var(--yvz-space-3);
+        gap: 0 var(--yvz-space-3);
       }
 
       .label {
+        max-width: 100%;
         overflow: hidden;
         color: var(--yvz-text-muted);
         font-size: var(--yvz-text-label);
@@ -47,6 +54,7 @@ export class YvzRate extends LitElement {
       .values {
         display: flex;
         gap: var(--yvz-space-3);
+        margin-inline-start: auto;
         color: var(--yvz-text);
         font-size: var(--yvz-text-title);
         font-weight: var(--yvz-weight-medium);
@@ -64,6 +72,18 @@ export class YvzRate extends LitElement {
       .values ha-icon {
         --mdc-icon-size: 14px;
         color: var(--yvz-text-muted);
+      }
+
+      /* below this width they always wrap, so neighbouring cells line up */
+      @container (max-width: 239px) {
+        .head {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .values {
+          justify-content: flex-end;
+        }
       }
 
       small {
@@ -118,20 +138,24 @@ export class YvzRate extends LitElement {
         <span class="label">${this.label}</span>
         <span class="values">
           ${this.series.map(
-            (s) => html`<span>
-              ${s.icon ? html`<ha-icon .icon=${s.icon}></ha-icon>` : nothing}${this.format(s.value)}${s.unit
+            (s, i) => html`<span>
+              ${s.icon ? html`<ha-icon .icon=${s.icon}></ha-icon>` : nothing}${this.format(
+                (this.tweens[i] ??= new NumberTween(this)).set(s.value),
+              )}${s.unit
                 ? html`<small>${s.unit}</small>`
                 : nothing}
             </span>`,
           )}
         </span>
       </div>
-      <div class="lines">
-        ${this.series.map((s) => {
-          const pct = this.peak > 0 && s.value != null ? Math.min(100, (s.value / this.peak) * 100) : 0;
-          return html`<div class="line"><div class="fill" style="width: ${pct}%"></div></div>`;
-        })}
-      </div>
+      ${this.bars
+        ? html`<div class="lines">
+            ${this.series.map((s) => {
+              const pct = this.peak > 0 && s.value != null ? Math.min(100, (s.value / this.peak) * 100) : 0;
+              return html`<div class="line"><div class="fill" style="width: ${pct}%"></div></div>`;
+            })}
+          </div>`
+        : nothing}
     `;
   }
 }

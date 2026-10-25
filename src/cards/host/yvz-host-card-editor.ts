@@ -4,7 +4,7 @@ import type { TranslationKey } from "../../shared/i18n";
 import type { HaFormSchema } from "../../shared/types";
 import "../../shared/yvz-list-editor";
 import { prune, YvzCardEditor } from "../../shared/yvz-card-editor";
-import type { HostCardConfig, HostGuest, HostSensor } from "./types";
+import { GUEST_KINDS, type HostCardConfig, type HostGuest, type HostSensor } from "./types";
 
 const sensor = (extra: Record<string, unknown> = {}) => ({ selector: { entity: { domain: "sensor", ...extra } } });
 const number = { selector: { number: { mode: "box" } } };
@@ -22,6 +22,8 @@ export class YvzHostCardEditor extends YvzCardEditor<HostCardConfig> {
       { name: "memory", ...sensor() },
       { name: "trend", selector: { boolean: {} } },
       { name: "trend_hours", selector: { number: { mode: "box", min: 1, max: 168 } } },
+      { name: "compact", selector: { boolean: {} } },
+      { name: "columns", selector: { number: { mode: "box", min: 1, max: 6 } } },
       {
         type: "expandable",
         name: "network",
@@ -56,6 +58,7 @@ export class YvzHostCardEditor extends YvzCardEditor<HostCardConfig> {
     return [
       { name: "entity", required: true, selector: { entity: {} } },
       { name: "name", selector: { text: {} } },
+      { name: "icon", selector: { icon: {} } },
       { name: "warn_at", ...number },
       { name: "error_at", ...number },
     ];
@@ -65,6 +68,16 @@ export class YvzHostCardEditor extends YvzCardEditor<HostCardConfig> {
     return [
       { name: "name", selector: { text: {} } },
       { name: "prefix", selector: { text: {} } },
+      {
+        name: "kind",
+        selector: {
+          select: {
+            mode: "dropdown",
+            options: GUEST_KINDS.map((k) => ({ value: k, label: this.t(`host.kind_${k}`) })),
+          },
+        },
+      },
+      { name: "icon", selector: { icon: {} } },
       {
         type: "expandable",
         name: "overrides",
