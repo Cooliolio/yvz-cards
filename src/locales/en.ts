@@ -1,0 +1,43 @@
+const en = {
+  "common.unavailable": "Unavailable",
+  "common.unknown": "Unknown",
+  "common.no_data": "No data",
+  "common.confirm": "Sure?",
+  "common.tap_again": "Tap again to confirm",
+  "common.hours_short": "{count} h",
+  "common.minutes_short": "{count} min",
+  "common.decrease": "Decrease",
+  "common.increase": "Increase",
+
+  "role.on": "On",
+  "role.off": "Off",
+  "role.standby": "Standby",
+  "role.pending": "Starting / waiting",
+  "role.error": "Error",
+
+  "stove.default_name": "Stove",
+  "stove.temp": "Temp",
+  "stove.fan": "Fan",
+  "stove.power": "Power",
+  "stove.q_off": "Turn on?",
+  "stove.q_on": "Turn off?",
+  "stove.q_pending": "Cancel start-up?",
+  "stove.q_standby": "Turn on again?",
+  "stove.q_error": "Restart?",
+  "stove.q_default": "Send power command?",
+  "stove.actions": "Controls",
+  "stove.state_map": "State meaning",
+  "stove.state_map_help": "Choose what each state of the status entity means. Unmapped states use the accent colour.",
+  "stove.field.name": "Name",
+  "stove.field.status": "Status entity",
+  "stove.field.temperature": "Temperature sensor",
+  "stove.field.power_sensor": "Power usage sensor",
+  "stove.field.power": "Power button",
+  "stove.field.temp_up": "Temperature up",
+  "stove.field.temp_down": "Temperature down",
+  "stove.field.fan_up": "Fan up",
+  "stove.field.fan_down": "Fan down",
+};
+
+export type Dictionary = Record<keyof typeof en, string>;
+export default en as Dictionary;
