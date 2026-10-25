@@ -25,6 +25,7 @@ export interface HomeAssistant {
     target?: Record<string, unknown>,
   ): Promise<unknown>;
   formatEntityState?(stateObj: HassEntity, state?: string): string;
+  callWS<T = unknown>(message: Record<string, unknown>): Promise<T>;
 }
 
 export interface LovelaceCardConfig {
@@ -35,6 +36,7 @@ export interface LovelaceCardConfig {
 export interface HaFormSchema {
   name: string;
   type?: "expandable";
+  flatten?: boolean;
   title?: string;
   required?: boolean;
   selector?: Record<string, unknown>;

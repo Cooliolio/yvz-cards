@@ -24,6 +24,8 @@ const CSS_TEXT = `
   --yvz-line-title: 24px;
   --yvz-text-value: 20px;
   --yvz-line-value: 28px;
+  --yvz-text-big: 28px;
+  --yvz-line-big: 36px;
   --yvz-text-display: 44px;
   --yvz-line-display: 52px;
 

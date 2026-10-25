@@ -1,0 +1,143 @@
+import { css, html, LitElement, nothing } from "lit";
+import { customElement, property } from "lit/decorators.js";
+import { designStyles } from "../styles";
+
+export interface RateSeries {
+  value?: number;
+  unit?: string;
+  icon?: string;
+}
+
+const PEAK_HALF_LIFE_MS = 10 * 60_000;
+
+// Rates have no natural maximum, so lines scale to a recent peak that slowly decays.
+@customElement("yvz-rate")
+export class YvzRate extends LitElement {
+  @property() label = "";
+  @property() locale = "";
+  @property({ attribute: false }) series: RateSeries[] = [];
+
+  private peak = 0;
+  private peakAt = Date.now();
+
+  static override styles = [
+    designStyles,
+    css`
+      :host {
+        display: block;
+        min-width: 0;
+      }
+
+      .head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--yvz-space-3);
+      }
+
+      .label {
+        overflow: hidden;
+        color: var(--yvz-text-muted);
+        font-size: var(--yvz-text-label);
+        line-height: var(--yvz-line-label);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .values {
+        display: flex;
+        gap: var(--yvz-space-3);
+        color: var(--yvz-text);
+        font-size: var(--yvz-text-title);
+        font-weight: var(--yvz-weight-medium);
+        font-variant-numeric: tabular-nums;
+        line-height: var(--yvz-line-title);
+        white-space: nowrap;
+      }
+
+      .values span {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+      }
+
+      .values ha-icon {
+        --mdc-icon-size: 14px;
+        color: var(--yvz-text-muted);
+      }
+
+      small {
+        margin-inline-start: 2px;
+        color: var(--yvz-text-muted);
+        font-size: var(--yvz-text-label);
+        font-weight: var(--yvz-weight-regular);
+      }
+
+      .lines {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        margin-top: var(--yvz-space-2);
+      }
+
+      .line {
+        height: 2px;
+        border-radius: 1px;
+        background: var(--yvz-divider);
+      }
+
+      .fill {
+        height: 100%;
+        border-radius: 1px;
+        background: var(--yvz-text);
+        transition: width var(--yvz-duration-slow) var(--yvz-ease);
+      }
+
+      .line:nth-child(n + 2) .fill {
+        opacity: 0.5;
+      }
+    `,
+  ];
+
+  protected override willUpdate(): void {
+    const now = Date.now();
+    const current = Math.max(0, ...this.series.map((s) => s.value ?? 0));
+    const decayed = this.peak * 0.5 ** ((now - this.peakAt) / PEAK_HALF_LIFE_MS);
+    this.peak = Math.max(current, decayed);
+    this.peakAt = now;
+  }
+
+  private format(value: number | undefined): string {
+    if (value == null || Number.isNaN(value)) return "—";
+    return value.toLocaleString(this.locale || undefined, { maximumFractionDigits: value < 10 ? 1 : 0 });
+  }
+
+  protected override render() {
+    return html`
+      <div class="head">
+        <span class="label">${this.label}</span>
+        <span class="values">
+          ${this.series.map(
+            (s) => html`<span>
+              ${s.icon ? html`<ha-icon .icon=${s.icon}></ha-icon>` : nothing}${this.format(s.value)}${s.unit
+                ? html`<small>${s.unit}</small>`
+                : nothing}
+            </span>`,
+          )}
+        </span>
+      </div>
+      <div class="lines">
+        ${this.series.map((s) => {
+          const pct = this.peak > 0 && s.value != null ? Math.min(100, (s.value / this.peak) * 100) : 0;
+          return html`<div class="line"><div class="fill" style="width: ${pct}%"></div></div>`;
+        })}
+      </div>
+    `;
+  }
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "yvz-rate": YvzRate;
+  }
+}

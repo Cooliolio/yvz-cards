@@ -4,6 +4,10 @@ export type { YvzState } from "./palette";
 export type { ButtonStatus, ButtonTone } from "./components/yvz-button";
 export type { StepDirection } from "./components/yvz-stepper";
 export type { PowerEmphasis } from "./components/yvz-power-button";
+export type { GaugeVariant } from "./components/yvz-gauge";
+export { gaugeState } from "./components/yvz-gauge";
+export type { RateSeries } from "./components/yvz-rate";
+export type { StackPart } from "./components/yvz-stack";
 
 import "./components/yvz-icon-badge";
 import "./components/yvz-chip";
@@ -13,3 +17,7 @@ import "./components/yvz-button";
 import "./components/yvz-stepper";
 import "./components/yvz-confirm-button";
 import "./components/yvz-power-button";
+import "./components/yvz-gauge";
+import "./components/yvz-rate";
+import "./components/yvz-stack";
+import "./components/yvz-sparkline";
