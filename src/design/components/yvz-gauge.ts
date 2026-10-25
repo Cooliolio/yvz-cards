@@ -39,6 +39,7 @@ export class YvzGauge extends LitElement {
   @property({ type: Boolean }) invert = false;
   @property({ type: Number }) target?: number;
   @property() display = "";
+  @property() tone?: YvzState;
 
   static override styles = [
     designStyles,
@@ -187,7 +188,7 @@ export class YvzGauge extends LitElement {
   }
 
   protected override willUpdate(): void {
-    this.setAttribute("data-state", gaugeState(this));
+    this.setAttribute("data-state", this.tone ?? gaugeState(this));
     this.setAttribute("role", "meter");
     this.setAttribute("aria-label", this.label);
     this.setAttribute("aria-valuemin", String(this.min));

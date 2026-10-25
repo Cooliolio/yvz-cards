@@ -9,7 +9,7 @@ import { TickController } from "../../shared/tick-controller";
 import type { HassEntity, LovelaceCardConfig } from "../../shared/types";
 import { YvzCard } from "../../shared/yvz-card";
 import "./yvz-host-card-editor";
-import type { HostCardConfig, HostGuest } from "./types";
+import type { HostCardConfig, HostGuest, HostSensor } from "./types";
 
 const UNAVAILABLE = ["unavailable", "unknown"];
 const USAGE = { warn: 70, error: 90 };
@@ -115,7 +115,13 @@ export class YvzHostCard extends YvzCard<HostCardConfig> {
     if (!this.config?.trend || !entity || variant === "segments") return this.cell(entity, gauge);
     return this.cell(
       entity,
-      html`${gauge}<yvz-sparkline class="trend" .hass=${this.hass} .entity=${entity} .height=${22}></yvz-sparkline>`,
+      html`${gauge}<yvz-sparkline
+        class="trend"
+        .hass=${this.hass}
+        .entity=${entity}
+        .hours=${this.config.trend_hours ?? 24}
+        .height=${22}
+      ></yvz-sparkline>`,
     );
   }
 
@@ -127,7 +133,58 @@ export class YvzHostCard extends YvzCard<HostCardConfig> {
       .map((s) => ({ value: this.number(s.id), unit: this.unit(s.id), icon: s.icon }));
     return this.cell(
       a ?? b,
-      html`<yvz-rate .label=${label} .series=${series} .locale=${this.hass?.locale?.language ?? ""}></yvz-rate>`,
+      html`<yvz-rate .label=${label} .series=${series} .locale=${this.hass?.locale?.language ?? ""}></yvz-rate>
+        ${this.config?.trend
+          ? [a, b].map((id) =>
+              id
+                ? html`<yvz-sparkline
+                    class="trend"
+                    .hass=${this.hass}
+                    .entity=${id}
+                    .hours=${this.config?.trend_hours ?? 24}
+                    .height=${18}
+                  ></yvz-sparkline>`
+                : nothing,
+            )
+          : nothing}`,
+    );
+  }
+
+  private stat(s: HostSensor): TemplateResult | typeof nothing {
+    if (!s.entity || !this.hass) return nothing;
+    const t = this.t;
+    const e = this.entity(s.entity);
+    const base = { entity: s.entity, label: this.label(s.entity, s.name) };
+    const deviceClass = e?.attributes.device_class;
+    let display = "";
+    let value: number | undefined;
+    let tone: YvzState | undefined;
+    if (e && deviceClass === "timestamp" && !Number.isNaN(Date.parse(e.state))) {
+      display = t("host.ago", { time: formatDurationShort(t, Date.now() - Date.parse(e.state)) });
+    } else if (e && s.entity.startsWith("binary_sensor.")) {
+      display = this.hass.formatEntityState?.(e) ?? e.state;
+      if (deviceClass === "problem") tone = e.state === "on" ? "error" : "accent";
+    } else if (e) {
+      value = parseFloat(e.state);
+      if (Number.isNaN(value)) {
+        value = undefined;
+        display = this.hass.formatEntityState?.(e) ?? e.state;
+      }
+    }
+    return this.cell(
+      base.entity,
+      html`<yvz-gauge
+        variant="stat"
+        .label=${base.label}
+        .unit=${this.unit(base.entity)}
+        .value=${value}
+        .display=${display}
+        .tone=${tone}
+        .decimals=${value != null && !Number.isInteger(value) && Math.abs(value) < 10 ? 1 : 0}
+        .warnAt=${s.warn_at}
+        .errorAt=${s.error_at}
+        .locale=${this.hass.locale?.language ?? ""}
+      ></yvz-gauge>`,
     );
   }
 
@@ -219,6 +276,7 @@ export class YvzHostCard extends YvzCard<HostCardConfig> {
       this.rates(t("host.disk_io"), c.disk_io?.read, c.disk_io?.write),
     ];
     const guests = (c.guests ?? []).map((g) => this.renderGuest(g)).filter((g) => g !== nothing);
+    const stats = (c.stats ?? []).map((s) => this.stat(s));
 
     return html`
       <ha-card data-state=${role}>
@@ -232,6 +290,7 @@ export class YvzHostCard extends YvzCard<HostCardConfig> {
         </div>
         ${this.section("", usage)} ${this.section(t("host.section_temps"), temps)}
         ${this.section(t("host.section_storage"), disks)} ${this.section("", io)}
+        ${this.section(t("host.section_details"), stats)}
         ${guests.length
           ? html`<section>
               <div class="caption">${t("host.section_guests")}</div>

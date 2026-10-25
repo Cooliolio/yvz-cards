@@ -21,6 +21,7 @@ export class YvzHostCardEditor extends YvzCardEditor<HostCardConfig> {
       { name: "cpu", ...sensor() },
       { name: "memory", ...sensor() },
       { name: "trend", selector: { boolean: {} } },
+      { name: "trend_hours", selector: { number: { mode: "box", min: 1, max: 168 } } },
       {
         type: "expandable",
         name: "network",
@@ -45,6 +46,15 @@ export class YvzHostCardEditor extends YvzCardEditor<HostCardConfig> {
   private get sensorSchema(): HaFormSchema[] {
     return [
       { name: "entity", required: true, ...sensor() },
+      { name: "name", selector: { text: {} } },
+      { name: "warn_at", ...number },
+      { name: "error_at", ...number },
+    ];
+  }
+
+  private get statSchema(): HaFormSchema[] {
+    return [
+      { name: "entity", required: true, selector: { entity: {} } },
       { name: "name", selector: { text: {} } },
       { name: "warn_at", ...number },
       { name: "error_at", ...number },
@@ -77,7 +87,7 @@ export class YvzHostCardEditor extends YvzCardEditor<HostCardConfig> {
     this.emit(prune({ ...event.detail.value }));
   }
 
-  private setList(key: "temperatures" | "disks" | "guests", items: Record<string, unknown>[]): void {
+  private setList(key: "temperatures" | "disks" | "stats" | "guests", items: Record<string, unknown>[]): void {
     const config = { ...this.config! } as HostCardConfig;
     if (items.length) (config as Record<string, unknown>)[key] = items.map((i) => prune(i));
     else delete config[key];
@@ -95,7 +105,7 @@ export class YvzHostCardEditor extends YvzCardEditor<HostCardConfig> {
   };
 
   private list(
-    key: "temperatures" | "disks" | "guests",
+    key: "temperatures" | "disks" | "stats" | "guests",
     title: string,
     addLabel: string,
     schema: HaFormSchema[],
@@ -133,6 +143,7 @@ export class YvzHostCardEditor extends YvzCardEditor<HostCardConfig> {
       ></ha-form>
       ${this.list("temperatures", t("host.section_temps"), t("host.add_temperature"), this.sensorSchema, this.sensorTitle)}
       ${this.list("disks", t("host.section_storage"), t("host.add_disk"), this.sensorSchema, this.sensorTitle)}
+      ${this.list("stats", t("host.section_details"), t("host.add_stat"), this.statSchema, this.sensorTitle)}
       ${this.list("guests", t("host.section_guests"), t("host.add_guest"), this.guestSchema, this.guestTitle)}
     `;
   }

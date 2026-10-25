@@ -29,5 +29,7 @@ export interface HostCardConfig extends LovelaceCardConfig {
   network?: { down?: string; up?: string };
   disk_io?: { read?: string; write?: string };
   guests?: HostGuest[];
+  stats?: HostSensor[];
   trend?: boolean;
+  trend_hours?: number;
 }

@@ -158,6 +158,13 @@ const host: Scene = {
     ],
     network: { down: "sensor.pve_hw_enx_rx", up: "sensor.pve_hw_enx_tx" },
     disk_io: { read: "sensor.pve_hw_nvme0n1_disk_read", write: "sensor.pve_hw_nvme0n1_disk_write" },
+    stats: [
+      { entity: "sensor.pve_hw_cpu_fan_fan_speed", name: "Fan" },
+      { entity: "sensor.pve_hw_battery_charge", name: "Battery" },
+      { entity: "sensor.pve_last_backup", name: "Last backup" },
+      { entity: "sensor.pve_backup_duration", name: "Backup duration" },
+      { entity: "binary_sensor.pve_backup_status", name: "Backup status" },
+    ],
     guests: [
       { prefix: "haos18_2", name: "HAOS" },
       { prefix: "octoprint", name: "OctoPrint" },
@@ -207,6 +214,11 @@ const host: Scene = {
       sensor("sensor.pve_hw_enx_tx", v.tx as number, "Mbit/s", { device_class: "data_rate" }),
       sensor("sensor.pve_hw_nvme0n1_disk_read", v.read as number, "MB/s", { device_class: "data_rate" }),
       sensor("sensor.pve_hw_nvme0n1_disk_write", v.write as number, "MB/s", { device_class: "data_rate" }),
+      sensor("sensor.pve_hw_cpu_fan_fan_speed", 1500, "rpm"),
+      sensor("sensor.pve_hw_battery_charge", 85, "%", { device_class: "battery" }),
+      entity("sensor.pve_last_backup", new Date(Date.now() - 14 * 3_600_000).toISOString(), { device_class: "timestamp" }),
+      sensor("sensor.pve_backup_duration", 1.65, "min", { device_class: "duration" }),
+      entity("binary_sensor.pve_backup_status", "off", { device_class: "problem" }),
       ...GUESTS.flatMap((g) => [
         entity(`binary_sensor.${g.prefix}_status`, v.guestOff === g.prefix ? "off" : "on", {
           device_class: "running",
