@@ -1,0 +1,225 @@
+import type { HassEntity } from "../src/shared/types";
+
+export type ControlValue = string | number | boolean;
+
+export interface Control {
+  key: string;
+  label: string;
+  type: "select" | "range" | "checkbox";
+  value: ControlValue;
+  options?: string[];
+  min?: number;
+  max?: number;
+  step?: number;
+}
+
+export interface Scene {
+  name: string;
+  tag: string;
+  width?: number;
+  config: Record<string, unknown>;
+  controls: Control[];
+  states(values: Record<string, ControlValue>): Record<string, HassEntity>;
+}
+
+const entity = (
+  entity_id: string,
+  state: string,
+  attributes: Record<string, unknown> = {},
+  minutesAgo = 0,
+): HassEntity => {
+  const when = new Date(Date.now() - minutesAgo * 60_000).toISOString();
+  return { entity_id, state, attributes, last_changed: when, last_updated: when };
+};
+
+const STOVE_OPTIONS = ["Uit", "Ontsteken", "Brandt", "Uitdoven", "Storing"];
+
+const stove: Scene = {
+  name: "Stove",
+  tag: "yvz-stove-card",
+  config: {
+    type: "custom:yvz-stove-card",
+    name: "Soba",
+    status: "input_select.stove_status",
+    temperature: "sensor.stove_temperature",
+    power_sensor: "sensor.stove_power",
+    state_map: { Uit: "off", Ontsteken: "pending", Brandt: "on", Uitdoven: "standby", Storing: "error" },
+    actions: {
+      power: "script.stove_power",
+      temp_up: "script.stove_temp_up",
+      temp_down: "script.stove_temp_down",
+      fan_up: "script.stove_fan_up",
+      fan_down: "script.stove_fan_down",
+    },
+  },
+  controls: [
+    { key: "status", label: "Status", type: "select", value: "Brandt", options: [...STOVE_OPTIONS, "unavailable"] },
+    { key: "minutes", label: "Minutes in state", type: "range", value: 9, min: 0, max: 300, step: 1 },
+    { key: "temperature", label: "Temperature", type: "range", value: 18.2, min: 5, max: 30, step: 0.1 },
+    { key: "power", label: "Power (W)", type: "range", value: 39, min: 0, max: 1000, step: 1 },
+  ],
+  states(v) {
+    const scripts = ["power", "temp_up", "temp_down", "fan_up", "fan_down"].map((a) =>
+      entity(`script.stove_${a}`, "off"),
+    );
+    return Object.fromEntries(
+      [
+        entity("input_select.stove_status", String(v.status), { options: STOVE_OPTIONS }, Number(v.minutes)),
+        entity("sensor.stove_temperature", String(v.temperature), { device_class: "temperature" }),
+        entity("sensor.stove_power", String(v.power), { device_class: "power" }),
+        ...scripts,
+      ].map((e) => [e.entity_id, e]),
+    );
+  },
+};
+
+const gaugeControl = (key: string, label: string, value: number, min = 0, max = 100, step = 1): Control => ({
+  key,
+  label,
+  type: "range",
+  value,
+  min,
+  max,
+  step,
+});
+
+const gauges: Scene = {
+  name: "Gauges",
+  tag: "yvz-gauge-gallery",
+  width: 560,
+  config: { type: "custom:yvz-gauge-gallery" },
+  controls: [
+    gaugeControl("cpu", "CPU", 23),
+    gaugeControl("ram", "RAM", 78),
+    gaugeControl("jellyfin", "Jellyfin", 41),
+    gaugeControl("frigate", "Frigate", 12),
+    gaugeControl("disk", "Disk", 96),
+    gaugeControl("temp", "CPU temp", 58, 20, 100),
+    gaugeControl("nvme", "NVMe temp", 47, 20, 100),
+    gaugeControl("chipset", "Chipset temp", 72, 20, 100),
+    gaugeControl("case", "Case temp", 36, 20, 80),
+    gaugeControl("battery", "Battery", 30),
+    gaugeControl("lvm", "local-lvm", 44),
+    gaugeControl("rec", "Recordings", 71),
+    gaugeControl("viewers", "Jellyfin viewers", 2, 0, 10),
+    gaugeControl("detector", "Detector (ms)", 34, 0, 150),
+    gaugeControl("fps", "Camera fps", 15, 0, 30),
+    gaugeControl("rx", "Net down (MB/s)", 12, 0, 100),
+    gaugeControl("tx", "Net up (MB/s)", 3, 0, 100),
+    gaugeControl("read", "NVMe read (MB/s)", 45, 0, 500),
+    gaugeControl("write", "NVMe write (MB/s)", 8, 0, 500),
+    gaugeControl("backupAge", "Backup age (h)", 20, 0, 36),
+    gaugeControl("boost", "Boost left (min)", 11, 0, 15),
+    gaugeControl("heat", "Room temp", 19.2, 10, 30, 0.1),
+    gaugeControl("heatTarget", "Target temp", 21, 10, 30, 0.5),
+    gaugeControl("tank", "Pellet tank (kg)", 12.5, 0, 26, 0.5),
+    gaugeControl("sys", "Storage system (GB)", 120, 0, 1000),
+    gaugeControl("recgb", "Storage recordings (GB)", 310, 0, 1000),
+    gaugeControl("media", "Storage media (GB)", 480, 0, 1000),
+  ],
+  states(v) {
+    return Object.fromEntries(
+      Object.keys(v).map((k) => [`sensor.demo_${k}`, entity(`sensor.demo_${k}`, String(v[k]))]),
+    );
+  },
+};
+
+const sensor = (id: string, state: string | number, unit: string, extra: Record<string, unknown> = {}) =>
+  entity(id, String(state), { unit_of_measurement: unit, ...extra });
+
+const GUESTS = [
+  { prefix: "haos18_2", cpu: 6, mem: 41, disk: 11.4, days: 21 },
+  { prefix: "octoprint", cpu: 3, mem: 28, disk: 5.2, days: 8 },
+  { prefix: "dnd_game", cpu: 1, mem: 12, disk: 3.8, days: 29 },
+  { prefix: "apiary", cpu: 2, mem: 18, disk: 2.2, days: 29 },
+];
+
+const host: Scene = {
+  name: "Host",
+  tag: "yvz-host-card",
+  width: 520,
+  config: {
+    type: "custom:yvz-host-card",
+    name: "pve",
+    trend: true,
+    status: "binary_sensor.pve_status",
+    uptime: "sensor.pve_uptime",
+    temperature: "sensor.pve_hw_package_id_0_temperature",
+    cpu: "sensor.pve_cpu_usage",
+    memory: "sensor.pve_memory_usage_percentage",
+    temperatures: [
+      { entity: "sensor.pve_hw_package_id_0_temperature", name: "CPU" },
+      { entity: "sensor.pve_hw_composite_temperature", name: "NVMe", warn_at: 60, error_at: 75 },
+      { entity: "sensor.pve_hw_pch_cannonlake_0_temperature", name: "Chipset" },
+    ],
+    disks: [
+      { entity: "sensor.storage_local_storage_usage_percentage", name: "local" },
+      { entity: "sensor.storage_local_lvm_storage_usage_percentage", name: "local-lvm" },
+    ],
+    network: { down: "sensor.pve_hw_enx_rx", up: "sensor.pve_hw_enx_tx" },
+    disk_io: { read: "sensor.pve_hw_nvme0n1_disk_read", write: "sensor.pve_hw_nvme0n1_disk_write" },
+    guests: [
+      { prefix: "haos18_2", name: "HAOS" },
+      { prefix: "octoprint", name: "OctoPrint" },
+      { prefix: "dnd_game", name: "dnd-game" },
+      { prefix: "apiary", name: "apiary" },
+    ],
+  },
+  controls: [
+    { key: "status", label: "Status", type: "select", value: "on", options: ["on", "off", "unavailable"] },
+    gaugeControl("days", "Uptime (days)", 28, 0, 90),
+    gaugeControl("cpu", "CPU", 2),
+    gaugeControl("ram", "RAM", 79),
+    gaugeControl("tempCpu", "CPU temp", 41, 20, 100),
+    gaugeControl("tempNvme", "NVMe temp", 47, 20, 100),
+    gaugeControl("tempChipset", "Chipset temp", 72, 20, 100),
+    gaugeControl("local", "Storage local", 22),
+    gaugeControl("lvm", "Storage local-lvm", 83),
+    gaugeControl("rx", "Net down (Mbit/s)", 0.1, 0, 100, 0.1),
+    gaugeControl("tx", "Net up (Mbit/s)", 0.03, 0, 100, 0.01),
+    gaugeControl("read", "Disk read (MB/s)", 0.06, 0, 500, 0.01),
+    gaugeControl("write", "Disk write (MB/s)", 4, 0, 500, 0.1),
+    {
+      key: "guestOff",
+      label: "Guest down",
+      type: "select",
+      value: "none",
+      options: ["none", ...GUESTS.map((g) => g.prefix)],
+    },
+    gaugeControl("apiaryCpu", "apiary CPU", 2),
+  ],
+  states(v) {
+    const day = 86_400_000;
+    const iso = (days: number) => new Date(Date.now() - days * day).toISOString();
+    const temp = (id: string, value: ControlValue) =>
+      sensor(id, value as number, "°C", { device_class: "temperature" });
+    const list = [
+      entity("binary_sensor.pve_status", String(v.status), { device_class: "running" }),
+      entity("sensor.pve_uptime", iso(Number(v.days)), { device_class: "uptime" }),
+      sensor("sensor.pve_cpu_usage", v.cpu as number, "%"),
+      sensor("sensor.pve_memory_usage_percentage", v.ram as number, "%"),
+      temp("sensor.pve_hw_package_id_0_temperature", v.tempCpu),
+      temp("sensor.pve_hw_composite_temperature", v.tempNvme),
+      temp("sensor.pve_hw_pch_cannonlake_0_temperature", v.tempChipset),
+      sensor("sensor.storage_local_storage_usage_percentage", v.local as number, "%"),
+      sensor("sensor.storage_local_lvm_storage_usage_percentage", v.lvm as number, "%"),
+      sensor("sensor.pve_hw_enx_rx", v.rx as number, "Mbit/s", { device_class: "data_rate" }),
+      sensor("sensor.pve_hw_enx_tx", v.tx as number, "Mbit/s", { device_class: "data_rate" }),
+      sensor("sensor.pve_hw_nvme0n1_disk_read", v.read as number, "MB/s", { device_class: "data_rate" }),
+      sensor("sensor.pve_hw_nvme0n1_disk_write", v.write as number, "MB/s", { device_class: "data_rate" }),
+      ...GUESTS.flatMap((g) => [
+        entity(`binary_sensor.${g.prefix}_status`, v.guestOff === g.prefix ? "off" : "on", {
+          device_class: "running",
+          friendly_name: `${g.prefix} Status`,
+        }),
+        sensor(`sensor.${g.prefix}_cpu_usage`, g.prefix === "apiary" ? (v.apiaryCpu as number) : g.cpu, "%"),
+        sensor(`sensor.${g.prefix}_memory_usage_percentage`, g.mem, "%"),
+        sensor(`sensor.${g.prefix}_disk_usage`, g.disk, "GiB", { device_class: "data_size" }),
+        entity(`sensor.${g.prefix}_uptime`, iso(g.days), { device_class: "uptime" }),
+      ]),
+    ];
+    return Object.fromEntries(list.map((e) => [e.entity_id, e]));
+  },
+};
+
+export const scenes: Scene[] = [host, stove, gauges];
