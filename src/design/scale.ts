@@ -37,6 +37,8 @@ const CSS_TEXT = `
   --yvz-duration-base: 200ms;
   --yvz-duration-slow: 400ms;
   --yvz-ease: ease-out;
+  /* how far anything tappable shrinks while pressed */
+  --yvz-press-scale: 0.96;
 
   --yvz-surface: var(--ha-card-background, var(--card-background-color));
   --yvz-surface-raised: var(--secondary-background-color);

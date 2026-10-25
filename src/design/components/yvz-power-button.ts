@@ -64,7 +64,7 @@ export class YvzPowerButton extends LitElement {
       }
 
       button:active .face {
-        transform: scale(0.95);
+        transform: scale(var(--yvz-press-scale));
       }
 
       :host([emphasis="glow"]) .face {

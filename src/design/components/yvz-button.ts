@@ -10,9 +10,14 @@ export class YvzButton extends LitElement {
   @property() icon = "";
   @property({ reflect: true }) tone: ButtonTone = "default";
   @property({ type: Boolean, reflect: true }) active = false;
+  // Transparent with a thin border until active; for rows of options where only one is on.
+  @property({ type: Boolean, reflect: true }) outline = false;
   @property({ type: Boolean, reflect: true }) disabled = false;
   @property({ reflect: true }) status: ButtonStatus = "idle";
   @property() label = "";
+  // 0..1 draws a thin bar along the bottom, e.g. time left.
+  @property({ type: Number }) progress?: number;
+
 
   static override styles = [
     designStyles,
@@ -22,12 +27,14 @@ export class YvzButton extends LitElement {
       }
 
       button {
+        position: relative;
+        overflow: hidden;
         display: flex;
         align-items: center;
         justify-content: center;
         gap: var(--yvz-space-1);
         width: 100%;
-        min-height: 40px;
+        min-height: var(--yvz-button-height, 40px);
         padding: 0 var(--yvz-space-3);
         border: 0;
         border-radius: var(--yvz-radius-md);
@@ -39,6 +46,7 @@ export class YvzButton extends LitElement {
         transition:
           background var(--yvz-duration-fast) var(--yvz-ease),
           color var(--yvz-duration-fast) var(--yvz-ease),
+          box-shadow var(--yvz-duration-fast) var(--yvz-ease),
           transform var(--yvz-duration-fast) var(--yvz-ease);
       }
 
@@ -47,7 +55,7 @@ export class YvzButton extends LitElement {
       }
 
       button:active {
-        transform: scale(0.97);
+        transform: scale(var(--yvz-press-scale));
       }
 
       button:disabled {
@@ -60,8 +68,18 @@ export class YvzButton extends LitElement {
         color: var(--yvz-error-text);
       }
 
+      :host([outline]) button {
+        background: none;
+        box-shadow: inset 0 0 0 1px var(--yvz-divider);
+      }
+
+      :host([outline]) button:hover {
+        background: color-mix(in srgb, var(--yvz-text) 6%, transparent);
+      }
+
       :host([active]) button {
         background: var(--yvz-state, var(--yvz-accent));
+        box-shadow: none;
         color: #fff;
       }
 
@@ -84,6 +102,16 @@ export class YvzButton extends LitElement {
         --mdc-icon-size: 18px;
         flex: none;
       }
+
+      .progress {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        height: 3px;
+        background: currentColor;
+        opacity: 0.6;
+        transition: width var(--yvz-duration-slow) linear;
+      }
     `,
   ];
 
@@ -91,6 +119,9 @@ export class YvzButton extends LitElement {
     return html`
       <button type="button" ?disabled=${this.disabled} aria-label=${this.label || nothing}>
         ${this.icon ? html`<ha-icon .icon=${this.icon}></ha-icon>` : nothing}<slot></slot>
+        ${this.progress == null
+          ? nothing
+          : html`<span class="progress" style="width: ${Math.min(1, Math.max(0, this.progress)) * 100}%"></span>`}
       </button>
     `;
   }
