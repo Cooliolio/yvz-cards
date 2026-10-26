@@ -468,6 +468,7 @@ const tesla: Scene = {
     teslaCheck("update", "Update available"),
     teslaSelect("shift", "Gear", "p", ["p", "d", "r", "n"]),
     gaugeControl("speed", "Speed (km/h)", 50, 0, 160),
+    gaugeControl("driveAge", "Gear and speed updated (min ago)", 0, 0, 60),
   ],
   states(v) {
     const n = (key: string) => Number(v[key]);
@@ -518,8 +519,8 @@ const tesla: Scene = {
       ...(["win_fd", "win_fp", "win_rd", "win_rp"] as const).map((k) =>
         entity(teslaId(k), v.windows === "open" ? "on" : "off"),
       ),
-      entity(teslaId("shift"), String(v.shift)),
-      unit("speed", driving ? n("speed") : 0, "km/h"),
+      entity(teslaId("shift"), String(v.shift), {}, n("driveAge")),
+      entity(teslaId("speed"), String(driving ? n("speed") : 0), { unit_of_measurement: "km/h" }, n("driveAge")),
       entity(teslaId("flash"), "unknown"),
       entity(teslaId("honk"), "unknown"),
       entity(teslaId("wake"), "unknown"),

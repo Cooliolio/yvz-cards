@@ -148,6 +148,7 @@ const tr: Dictionary = {
   "tesla.panel_climate": "Klima paneli",
   "tesla.settings_hint": "Bu kartta nelerin görüneceğini seç. Yalnızca bu tarayıcıda saklanır.",
   "tesla.reset": "Varsayılana dön",
+  "tesla.stale_chip": "Eski veri",
   "tesla.parked": "Park halinde",
   "tesla.paint_custom": "Özel renk",
   "tesla.help.device_id": "Tüm varlıklar otomatik bulunur.",

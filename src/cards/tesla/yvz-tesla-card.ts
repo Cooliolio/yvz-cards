@@ -39,6 +39,8 @@ const TEMP_DEBOUNCE_MS = 900;
 const HOLD_MS = 2500;
 const TEMP_HOLD_MS = 15_000;
 const FLASH_MS = 2200;
+// A gear or speed reading older than this no longer counts as driving.
+const DRIVING_FRESH_MS = 5 * 60_000;
 // Same idea as the other cards: relative times ("5 min ago") stay fresh.
 const TICK_MS = 60_000;
 
@@ -199,13 +201,16 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
     return this.has("status") && this.st("status")?.state === "off";
   }
 
+  // Driving needs a gear and a recent reading: a car that last said "D" an hour ago is parked now.
   private get driving(): boolean {
     if (this.noData || this.asleep) return false;
     const shift = String(this.st("shift")?.state ?? "").toLowerCase();
-    if (["d", "r", "n"].includes(shift)) return true; // keeps spinning until it reports P
-    if (shift === "p") return false;
-    const speed = this.num("speed");
-    return speed !== null && speed > 0;
+    if (!["d", "r", "n"].includes(shift)) return false;
+    return (["shift", "speed"] as const).some((key) => {
+      const st = this.st(key);
+      const at = Date.parse(st?.last_reported ?? st?.last_updated ?? "");
+      return Number.isFinite(at) && Date.now() - at <= DRIVING_FRESH_MS;
+    });
   }
 
   // "open" from Tesla Fleet is meaningless without data (a missing value reads as open).
@@ -408,6 +413,7 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
         more: "shift",
       });
     } else chips.push({ state: "off", icon: "mdi:parking", text: t("tesla.parked"), more: "status" });
+    if (this.stale) chips.push({ state: "pending", icon: "mdi:clock-alert-outline", text: t("tesla.stale_chip"), more: "battery" });
 
     // Locked and the temperature live in the subtitle; the chip only shows when the car is unlocked.
     if (this.st("lock")?.state === "unlocked") {

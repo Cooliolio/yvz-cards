@@ -148,6 +148,7 @@ const nl: Dictionary = {
   "tesla.panel_climate": "Klimaatpaneel",
   "tesla.settings_hint": "Kies wat er op deze kaart staat. Alleen opgeslagen in deze browser.",
   "tesla.reset": "Standaard herstellen",
+  "tesla.stale_chip": "Oude gegevens",
   "tesla.parked": "Geparkeerd",
   "tesla.paint_custom": "Eigen kleur",
   "tesla.help.device_id": "Alle entiteiten worden automatisch gevonden.",

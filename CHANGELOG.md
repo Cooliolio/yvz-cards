@@ -2,6 +2,13 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.6.3 — 2026-10-26
+
+### Changed
+
+- Tesla: the car only counts as driving when its gear is D, R or N and the gear or speed was reported in the last 5 minutes. Otherwise the card shows it as parked, with an "Old data" chip when the data is more than 3 hours old. Before, a last reading of "D" kept the car driving until it reported P.
+- Playground: a control for how long ago the gear and speed were reported.
+
 ## 0.6.2 — 2026-10-26
 
 ### Changed

@@ -146,6 +146,7 @@ const en = {
   "tesla.panel_climate": "Climate panel",
   "tesla.settings_hint": "Choose what shows on this card. Saved in this browser only.",
   "tesla.reset": "Reset to default",
+  "tesla.stale_chip": "Old data",
   "tesla.parked": "Parked",
   "tesla.paint_custom": "Custom colour",
   "tesla.help.device_id": "Every entity is found automatically.",
