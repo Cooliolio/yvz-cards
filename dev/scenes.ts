@@ -18,13 +18,18 @@ export interface Scene {
   name: string;
   tag: string;
   width?: number;
+  // A fixed parent height, like a panel view.
+  height?: number;
   config: Record<string, unknown>;
   // More cards of the same type shown below the first, sharing its state.
   extra?: Record<string, unknown>[];
   controls: Control[];
   states(values: Record<string, ControlValue>): Record<string, HassEntity>;
   // Fake history for a history/history_during_period call; return nothing to use the default.
-  history?(message: Record<string, unknown>): Record<string, Array<Record<string, unknown>>> | undefined;
+  history?(
+    message: Record<string, unknown>,
+    values: Record<string, ControlValue>,
+  ): Record<string, Array<Record<string, unknown>>> | undefined;
   // For cards that look entities up in the registry instead of taking ids.
   registry?: { entities: Record<string, HassEntityRegistryEntry>; devices: Record<string, HassDevice> };
   // Lets service calls change the controls, standing in for HA automations.
@@ -362,46 +367,74 @@ const heating: Scene = {
 const MINUTE = 60_000;
 const DAY_MS = 86_400_000;
 
-// A believable week of heating: the pump cycles between 05:30 and 23:00, rooms follow the day.
-const fakePumpOn = (t: number): boolean => {
+// A believable stretch of heating: the pump cycles between 05:30 and 23:00, rooms follow the day.
+const midnight = (t: number): number => new Date(t).setHours(0, 0, 0, 0);
+
+interface FakeCase {
+  // The target is the frost temperature all the time.
+  frost: boolean;
+  // One glitchy reading yesterday afternoon.
+  spike: boolean;
+  // The pump only ran on one day (two days ago).
+  oneDay: boolean;
+  // Days of history that exist; earlier ones return nothing, like a new install.
+  dataDays: number;
+}
+
+const fakePumpOn = (t: number, c: FakeCase): boolean => {
   const d = new Date(t);
   const h = d.getHours() + d.getMinutes() / 60;
   if (h < 5.5 || h > 23) return false;
+  if (c.oneDay && midnight(t) !== midnight(Date.now() - 2 * DAY_MS)) return false;
   const day = Math.floor(t / DAY_MS);
   const cycle = 70 + (day % 5) * 6;
   return (t / MINUTE) % cycle < 22 + (day % 3) * 5;
 };
-const fakeSetpoint = (t: number): number => {
+const fakeSetpoint = (t: number, c: FakeCase): number => {
+  if (c.frost) return 5;
   const d = new Date(t);
   const h = d.getHours() + d.getMinutes() / 60;
   return h >= 6.5 && h < 22.5 ? 20.5 : 17;
 };
-const fakeTemp = (t: number, offset: number): number =>
-  18.4 + 1.3 * Math.sin((t / DAY_MS) * 2 * Math.PI - 1.6) + 0.35 * Math.sin(t / (80 * MINUTE)) + offset;
-const roomOffset = (id: string): number => ([...id].reduce((a, c) => a + c.charCodeAt(0), 0) % 40) / 10 - 2;
+const fakeTemp = (t: number, offset: number, c: FakeCase): number => {
+  const base = 18.4 + 1.3 * Math.sin((t / DAY_MS) * 2 * Math.PI - 1.6) + 0.35 * Math.sin(t / (80 * MINUTE)) + offset;
+  const spikeAt = midnight(Date.now()) - 10 * 3_600_000;
+  return c.spike && Math.abs(t - spikeAt) < 5 * MINUTE ? base + 9 : base;
+};
+const roomOffset = (id: string): number => ([...id].reduce((a, ch) => a + ch.charCodeAt(0), 0) % 40) / 10 - 2;
 
-function fakeHistory(message: Record<string, unknown>): Record<string, Array<Record<string, unknown>>> {
-  const start = Date.parse(message.start_time as string);
+function fakeHistory(
+  message: Record<string, unknown>,
+  v: Record<string, ControlValue>,
+): Record<string, Array<Record<string, unknown>>> {
+  const c: FakeCase = { frost: !!v.frost, spike: !!v.spike, oneDay: !!v.oneDay, dataDays: Number(v.dataDays ?? 60) };
   const end = Date.parse(message.end_time as string);
+  const asked = Date.parse(message.start_time as string);
+  // Nothing exists before the install, and the first sample is the first real reading.
+  const start = Math.max(asked, end - c.dataDays * DAY_MS);
   const withAttributes = message.minimal_response === false;
   const out: Record<string, Array<Record<string, unknown>>> = {};
   for (const id of message.entity_ids as string[]) {
     const items: Array<Record<string, unknown>> = [];
     const push = (t: number, s: string, a?: Record<string, unknown>) => items.push({ lu: t / 1000, s, ...(a ? { a } : {}) });
+    if (start >= end) {
+      out[id] = items;
+      continue;
+    }
     if (id === "binary_sensor.heating_pump") {
       let last: boolean | undefined;
       for (let t = start; t <= end; t += MINUTE) {
-        const on = fakePumpOn(t);
+        const on = fakePumpOn(t, c);
         if (on !== last) push(t, on ? "on" : "off");
         last = on;
       }
     } else if (id === "climate.heating") {
       for (let t = start; t <= end; t += 30 * MINUTE) {
-        push(t, "heat", withAttributes ? { temperature: fakeSetpoint(t), current_temperature: fakeTemp(t, 0) } : undefined);
+        push(t, "heat", withAttributes ? { temperature: fakeSetpoint(t, c), current_temperature: fakeTemp(t, 0, c) } : undefined);
       }
     } else if (id === "input_select.heating_mode") {
       push(start, "Eco");
-      for (let d = Math.floor(start / DAY_MS) * DAY_MS; d < end; d += DAY_MS) {
+      for (let d = midnight(start); d < end; d += DAY_MS) {
         const local = new Date(d);
         local.setHours(6, 30, 0, 0);
         if (local.getTime() > start && local.getTime() < end) push(local.getTime(), "Comfort");
@@ -415,16 +448,36 @@ function fakeHistory(message: Record<string, unknown>): Record<string, Array<Rec
       push(start, "off");
       const at = end - 3 * DAY_MS;
       if (id.endsWith("battery_low") && at > start) push(at, "on");
-    } else if (id === "sensor.heating_trend") {
-      for (let t = start; t <= end; t += 10 * MINUTE) push(t, fakePumpOn(t) ? "0.6" : "-0.15");
     } else {
       const offset = id === "sensor.heating_control_temperature" ? 0 : roomOffset(id);
-      for (let t = start; t <= end; t += 10 * MINUTE) push(t, fakeTemp(t, offset).toFixed(1));
+      for (let t = start; t <= end; t += 10 * MINUTE) push(t, fakeTemp(t, offset, c).toFixed(1));
     }
     out[id] = items;
   }
   return out;
 }
+
+const longTermSensors = (v: Record<string, ControlValue>): HassEntity[] => {
+  const hours = (id: string, value: number) => entity(id, String(value), { unit_of_measurement: "h", device_class: "duration" });
+  const count = (id: string, value: number) => entity(id, String(value), { unit_of_measurement: "times" });
+  const out: HassEntity[] = [];
+  if (v.longTerm) {
+    out.push(
+      hours("sensor.heating_pump_runtime_today", 4.4),
+      hours("sensor.heating_pump_runtime_yesterday", 6.2),
+      hours("sensor.heating_pump_runtime_week", 38.5),
+      hours("sensor.heating_pump_runtime_month", 151.2),
+      count("sensor.heating_pump_starts_today", 9),
+      count("sensor.heating_pump_starts_yesterday", 12),
+      count("sensor.heating_pump_starts_week", 71),
+      count("sensor.heating_pump_starts_month", 298),
+    );
+  }
+  if (v.season) {
+    out.push(hours("sensor.heating_pump_runtime_season", 412.6), count("sensor.heating_pump_starts_season", 1304));
+  }
+  return out;
+};
 
 const heatingStats: Scene = {
   ...heating,
@@ -434,7 +487,40 @@ const heatingStats: Scene = {
   config: { type: "custom:yvz-heating-stats-card" },
   extra: [{ type: "custom:yvz-heating-stats-card", compact: true }],
   history: fakeHistory,
+  controls: [
+    ...heating.controls,
+    { key: "frost", label: "Frost target (5°)", type: "checkbox", value: false },
+    { key: "spike", label: "One glitchy reading yesterday", type: "checkbox", value: false },
+    { key: "oneDay", label: "Pump ran on one day only", type: "checkbox", value: false },
+    gaugeControl("dataDays", "Days of history", 60, 1, 60),
+    { key: "season", label: "Season sensors", type: "checkbox", value: true },
+    { key: "longTerm", label: "Long-term sensors (today, week, month)", type: "checkbox", value: false },
+  ],
+  states(v) {
+    const states = heating.states(v);
+    for (const e of longTermSensors(v)) states[e.entity_id] = e;
+    return states;
+  },
 };
+
+// The same scene with one case switched on, so each can be opened directly.
+const statsCase = (name: string, patch: Record<string, ControlValue>, extra: Partial<Scene> = {}): Scene => ({
+  ...heatingStats,
+  name: `Heating stats · ${name}`,
+  ...extra,
+  controls: heatingStats.controls.map((c) => (c.key in patch ? { ...c, value: patch[c.key] } : c)),
+});
+
+const heatingStatsCases: Scene[] = [
+  statsCase("wide panel", {}, { width: 1100, height: 780, extra: [] }),
+  statsCase("frost target and spike", { frost: true, spike: true }),
+  statsCase("one active day", { oneDay: true }),
+  statsCase(
+    "new install",
+    { dataDays: 2 },
+    { config: { type: "custom:yvz-heating-stats-card", name: "Heating stats (new install)", period: "month" } },
+  ),
+];
 
 const TESLA_DEVICE = "tesla-device";
 const TESLA_PREFIX = "oprit_tesla_model_3_";
@@ -664,4 +750,4 @@ const gaugeCard: Scene = {
   },
 };
 
-export const scenes: Scene[] = [host, heating, heatingStats, tesla, gaugeCard, stove, gauges];
+export const scenes: Scene[] = [host, heating, heatingStats, ...heatingStatsCases, tesla, gaugeCard, stove, gauges];

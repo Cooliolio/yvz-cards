@@ -2,6 +2,25 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.7.1 — 2026-10-26
+
+### Added
+
+- Heating stats: a `compare` option (`same_time` or `full_day`). Today is now compared with yesterday up to the same time of day by default, and the subtitle says so ("compared with yesterday until 19:49").
+- Heating stats: duty cycle under the runtime figure, a season line from `sensor.heating_pump_runtime_season` and `sensor.heating_pump_starts_season`, and the gap to the target for every room with the coldest room highlighted.
+- Heating stats: tap a room, then tap again, to make it the leading room.
+- Heating stats: long pump runs (30 minutes or more) as events, with dates and times. 8 events on wide cards, 5 otherwise.
+- Heating stats: a "Collecting data (2 of 7 days)" note for 7 and 30 days on a new install.
+- `note` on `yvz-stat`, and `display` and `partial` on the bars of `yvz-bars`.
+- Playground: heating stats scenes for a wide panel, a frost target with a glitchy reading, a single active day and a new install, plus controls for them.
+
+### Changed
+
+- Heating stats: the timeline's scale now follows the room temperature, so a low target such as the frost temperature is clipped instead of flattening the line. Single glitchy readings are ignored in the chart, averages, minimums and maximums.
+- Heating stats: the average heating rate comes from real warm-ups only (runs of at least 10 minutes where the room got warmer) instead of averaging the trend sensor. It shows a dash when there is none.
+- Heating stats: the daily bars never scale below 2 hours, show the value above each bar, and hatch today. The average per day needs 3 finished days with history.
+- Heating stats: two columns from 900 px card width.
+
 ## 0.7.0 — 2026-10-26
 
 ### Added

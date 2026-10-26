@@ -170,17 +170,20 @@ Statistics for the heating package behind the heating card. With the same entity
 | `name` | "Heating stats" | Card title. |
 | `compact` | `false` | Only the key figures and the daily bars. |
 | `period` | `today` | Period shown first: `today`, `week` or `month`. The one you pick is remembered per card, in this browser. |
+| `compare` | `same_time` | What Today is compared with: `same_time` (yesterday up to the same time of day) or `full_day` (all of yesterday). The subtitle says which. |
 | `pump`, `climate`, `control`, `trend`, `mode`, `sensors`, `leading` | as in `heating.yaml` | Entities the card reads. |
 | `offline`, `no_warmup`, `sensor_problem`, `battery_low` | as in `heating.yaml` | Warning sensors, shown as events. |
-| `runtime_today`, `runtime_yesterday`, `runtime_week`, `runtime_month`, `starts_today`, `starts_yesterday`, `starts_week`, `starts_month` | `sensor.heating_pump_runtime_today` … | Optional long-term sensors (`history_stats`). Used when they exist; otherwise the card works it out from history. |
+| `runtime_today`, `runtime_yesterday`, `runtime_week`, `runtime_month`, `runtime_season`, `starts_…` | `sensor.heating_pump_runtime_today` … | Optional long-term sensors, see [Optional helpers](#optional-helpers). |
 
-- **Key figures** for pump runtime, number of starts, average room temperature and longest run, each with an arrow showing the change against the previous period (today is compared with yesterday up to the same time).
-- **Run timeline:** when the pump ran, with the target (dashed) and the room temperature on top. The target line is left out on 30 days, because the thermostat's history is heavy.
-- **Daily bars:** pump runtime per day, for 7 or 30 days, with the average of the finished days.
-- **Rooms:** now, lowest and highest in the period, and a small trend per room. The leading room is marked.
-- **Warm-up:** average heating rate, the last warm-up (from → to, minutes) and an estimate to the target. The estimate only shows while the pump runs and the room is warming.
-- **Events:** the last five mode changes and warnings.
-- Fills the height of a panel view, and has no editing controls.
+- **Key figures** for pump runtime, number of starts, average room temperature and longest run, each with an arrow showing the change against the previous period. Under the runtime is the duty cycle: the share of the elapsed time the pump ran.
+- **Run timeline:** when the pump ran, with the room temperature and the target (dashed) on top. The scale follows the room temperature, so a low target such as the frost temperature doesn't flatten the line; it is clipped instead. Single glitchy readings (a jump of more than 3° away from both neighbours) are ignored everywhere. The target is left out on 30 days, because the thermostat's history is heavy.
+- **Daily bars:** pump runtime per day for 7 or 30 days, with the value above each bar. The scale is at least 2 hours, and today is hatched because it isn't over. The average per day only shows once 3 finished days have history.
+- **Rooms:** now, the gap to the target, lowest and highest in the period, and a small trend. The coldest room is highlighted and the leading room is marked. Tap a room, then tap again to make it the leading room.
+- **Warm-up:** the average heating rate is worked out from real warm-ups only: runs of at least 10 minutes where the room got warmer, using the room temperature at the start and end of each run. It shows a dash when there is none. Also the last warm-up (from → to, minutes) and an estimate to the target, which only shows while the pump runs and the room is warming.
+- **Events:** the last 5 (8 on wide cards) mode changes, warnings and long pump runs (30 minutes or more), with their date and time.
+- **Season:** a line with the season's runtime and starts, when those sensors exist.
+- **New installs:** with fewer than 3 days of history, 7 and 30 days show "Collecting data (2 of 7 days)" and keep the figures.
+- Two columns from 900 px card width, based on the card itself, not the screen. Fills the height of a panel view, and has no editing controls.
 
 ### Optional helpers
 
@@ -196,8 +199,10 @@ The card works without these. When they exist and have a number as state, the ca
 | `sensor.heating_pump_starts_yesterday` | count | all of yesterday | Starts change for Today |
 | `sensor.heating_pump_starts_week` | count | rolling 7 days | Starts, 7 days |
 | `sensor.heating_pump_starts_month` | count | rolling 30 days | Starts, 30 days |
+| `sensor.heating_pump_runtime_season` | time (hours) | since the most recent 1 October | Season line |
+| `sensor.heating_pump_starts_season` | count | since the most recent 1 October | Season line |
 
-With the yesterday sensors in place, Today is compared with all of yesterday, so the arrows lean downwards early in the day. Without them it is compared with yesterday up to the same time.
+With `compare: full_day`, Today is compared with all of yesterday and uses the yesterday sensors; by default it compares with yesterday up to the same time of day, from history, so the arrows aren't skewed early in the day. The season sensors only feed the footer line, and the line is hidden when they are unavailable.
 
 A **start** is each time the pump switches on. An "on" that was already running when the period began doesn't count, with the sensors or without them.
 
@@ -213,6 +218,7 @@ Create each one in Home Assistant under **Settings → Devices & services → He
 | Yesterday | `{{ now().replace(hour=0, minute=0, second=0) - timedelta(days=1) }}` | `{{ now().replace(hour=0, minute=0, second=0) }}` |
 | 7 days | `{{ now() - timedelta(days=7) }}` | `{{ now() }}` |
 | 30 days | `{{ now() - timedelta(days=30) }}` | `{{ now() }}` |
+| Season | `{{ now().replace(month=10, day=1, hour=0, minute=0, second=0) if now().month >= 10 else now().replace(year=now().year - 1, month=10, day=1, hour=0, minute=0, second=0) }}` | `{{ now() }}` |
 
 4. Name each one so it gets the entity id above, for example "Heating pump runtime today".
 

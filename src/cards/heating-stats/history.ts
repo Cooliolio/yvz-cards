@@ -6,7 +6,12 @@ export const HOUR = 3_600_000;
 export const DAY = 24 * HOUR;
 const MAX_LINE_POINTS = 240;
 // A heating run shorter than this isn't a real warm-up.
-const MIN_WARMUP_MS = 5 * 60_000;
+const MIN_WARMUP_MS = 10 * 60_000;
+// A run this long is worth listing as an event.
+const LONG_RUN_MS = 30 * 60_000;
+// A reading this far from both neighbours, within minutes, is a glitch rather than weather.
+const SPIKE_STEP = 3;
+const SPIKE_WINDOW_MS = 15 * 60_000;
 
 export interface Sample {
   t: number;
@@ -100,6 +105,25 @@ export function thin(points: Point[], max = MAX_LINE_POINTS): Point[] {
   return out;
 }
 
+// Drops single readings that jump away from both neighbours, so they can't stretch a chart or skew a mean.
+export function despike<T extends { t: number }>(items: T[], value: (item: T) => number): T[] {
+  return items.filter((item, i) => {
+    const prev = items[i - 1];
+    const next = items[i + 1];
+    if (!prev || !next) return true;
+    if (item.t - prev.t > SPIKE_WINDOW_MS || next.t - item.t > SPIKE_WINDOW_MS) return true;
+    const v = value(item);
+    return !(Math.abs(v - value(prev)) > SPIKE_STEP && Math.abs(v - value(next)) > SPIKE_STEP);
+  });
+}
+
+export const cleanPoints = (points: Point[]): Point[] => despike(points, (p) => p.v);
+
+export function cleanSamples(samples: Sample[]): Sample[] {
+  const numbers = samples.filter((s) => !Number.isNaN(parseFloat(s.s)));
+  return despike(numbers, (s) => parseFloat(s.s));
+}
+
 export interface Runs {
   intervals: Interval[];
   starts: number;
@@ -152,17 +176,20 @@ export interface Window {
   from: number;
   to: number;
   prevFrom: number;
+  // Up to the same time of day (today) or the end of the previous period.
   prevTo: number;
+  // The whole previous period; only differs from prevTo for today.
+  prevFullTo: number;
 }
 
 // "Today" is compared with yesterday up to the same time of day, so the comparison is fair.
 export function windowOf(period: Period, now: number): Window {
   if (period === "today") {
     const from = dayStarts(1, now)[0];
-    return { from, to: now, prevFrom: from - DAY, prevTo: from - DAY + (now - from) };
+    return { from, to: now, prevFrom: from - DAY, prevTo: from - DAY + (now - from), prevFullTo: from };
   }
   const length = (period === "week" ? 7 : 30) * DAY;
-  return { from: now - length, to: now, prevFrom: now - 2 * length, prevTo: now - length };
+  return { from: now - length, to: now, prevFrom: now - 2 * length, prevTo: now - length, prevFullTo: now - length };
 }
 
 export interface RoomStats {
@@ -182,8 +209,17 @@ export interface WarmUp {
 
 export interface StatsEvent {
   t: number;
-  kind: "mode" | "warning";
+  kind: "mode" | "warning" | "run";
   key: string;
+  // How long a run lasted.
+  ms?: number;
+}
+
+export interface Totals {
+  runtime: number;
+  starts: number;
+  longest: number;
+  avgTemp?: number;
 }
 
 export interface StatsData {
@@ -193,8 +229,17 @@ export interface StatsData {
   runtime: number;
   starts: number;
   longest: number;
-  prev: { runtime: number; starts: number; longest: number; avgTemp?: number };
+  // The previous period: up to the same time of day, and (for today) the whole of yesterday.
+  prev: Totals;
+  prevFull: Totals;
   avgTemp?: number;
+  // Elapsed time of the period, for the duty cycle.
+  elapsed: number;
+  // Days the pump history covers, out of periodDays (0 for today).
+  dataDays: number;
+  periodDays: number;
+  // Finished days that have data, for the daily average.
+  finishedWithData: number;
   days: { start: number; runtime: number }[];
   setpoint: Point[];
   temperature: Point[];
@@ -236,7 +281,7 @@ export async function loadStats(
     fetchSamples(hass, [ids.pump], pumpFrom, now),
     fetchSamples(hass, [ids.control], window.prevFrom, now),
     period === "month" ? Promise.resolve<Record<string, Sample[]>>({}) : fetchSamples(hass, [ids.climate], window.from, now, true),
-    fetchSamples(hass, [ids.trend, ...roomEntities], window.from, now),
+    fetchSamples(hass, roomEntities, window.from, now),
     fetchSamples(hass, [ids.mode, ...warningIds], window.from, now),
   ]);
 
@@ -244,16 +289,19 @@ export async function loadStats(
   const all = runsOf(pump, pumpFrom, now);
   const current = runsOf(pump, window.from, now);
   const previous = runsOf(pump, window.prevFrom, window.prevTo);
+  const previousFull = runsOf(pump, window.prevFrom, window.prevFullTo);
 
-  const control = numeric(controlMap[ids.control] ?? []);
+  // Glitches in the room sensors would stretch the chart and skew the averages, so they go first.
+  const control = cleanPoints(numeric(controlMap[ids.control] ?? []));
   const setpoint = (climateMap[ids.climate] ?? [])
     .map((s) => ({ t: s.t, v: Number(s.a?.temperature) }))
     .filter((p) => Number.isFinite(p.v));
 
   const rooms: RoomStats[] = Object.entries(roomMap).map(([name, entity]) => {
-    const samples = roomMapSamples[entity] ?? [];
-    const pts = numeric(samples).filter((p) => p.t >= window.from);
-    const values = pts.map((p) => p.v);
+    const samples = cleanSamples(roomMapSamples[entity] ?? []);
+    const values = numeric(samples)
+      .filter((p) => p.t >= window.from)
+      .map((p) => p.v);
     return {
       name,
       entity,
@@ -271,17 +319,16 @@ export async function loadStats(
     if (Number.isNaN(r.current)) r.current = undefined;
   });
 
-  // Average rate: the trend sensor while the pump was running, ignoring cooling.
-  const trendPts = numeric(roomMapSamples[ids.trend] ?? []);
-  const rates = trendPts.filter((p) => p.v > 0 && current.intervals.some(([a, b]) => p.t >= a && p.t <= b)).map((p) => p.v);
-
-  const lastRun = [...current.intervals].reverse().find(([a, b]) => b - a >= MIN_WARMUP_MS);
+  // Real warm-ups only: runs of at least 10 minutes where the room actually got warmer.
+  const warmUps = current.intervals
+    .filter(([a, b]) => b - a >= MIN_WARMUP_MS)
+    .map(([a, b]) => ({ a, b, from: valueAt(control, a), to: valueAt(control, b) }))
+    .filter((r): r is { a: number; b: number; from: number; to: number } => r.from != null && r.to != null && r.to > r.from);
+  const rise = warmUps.reduce((n, r) => n + (r.to - r.from), 0);
+  const hours = warmUps.reduce((n, r) => n + (r.b - r.a) / HOUR, 0);
+  const lastRun = warmUps[warmUps.length - 1];
   const lastWarmUp: WarmUp | undefined = lastRun
-    ? {
-        from: valueAt(control, lastRun[0]),
-        to: valueAt(control, lastRun[1]),
-        minutes: Math.round((lastRun[1] - lastRun[0]) / 60_000),
-      }
+    ? { from: lastRun.from, to: lastRun.to, minutes: Math.round((lastRun.b - lastRun.a) / 60_000) }
     : undefined;
 
   const events: StatsEvent[] = [];
@@ -292,7 +339,22 @@ export async function loadStats(
       if (i > 0 && s.s === "on" && samples[i - 1].s !== "on") events.push({ t: s.t, kind: "warning", key });
     });
   }
+  current.intervals.forEach(([a, b]) => {
+    if (b - a >= LONG_RUN_MS) events.push({ t: a, kind: "run", key: "run", ms: b - a });
+  });
   events.sort((a, b) => b.t - a.t);
+
+  const totals = (runs: Runs, from: number, to: number): Totals => ({
+    runtime: sumOf(runs.intervals),
+    starts: runs.starts,
+    longest: longestOf(runs.intervals),
+    avgTemp: timeWeightedMean(control, from, to),
+  });
+  // Days the recorder covers: a new install has a short history and the longer periods can't be trusted yet.
+  const periodDays = period === "today" ? 0 : period === "week" ? 7 : 30;
+  const firstSample = pump[0]?.t;
+  const dataDays = firstSample == null ? 0 : Math.min(periodDays, Math.max(1, Math.ceil((now - firstSample) / DAY)));
+  const finishedWithData = days.slice(0, -1).filter((d) => firstSample != null && firstSample <= d + HOUR).length;
 
   return {
     period,
@@ -301,20 +363,20 @@ export async function loadStats(
     runtime: sumOf(current.intervals),
     starts: current.starts,
     longest: longestOf(current.intervals),
-    prev: {
-      runtime: sumOf(previous.intervals),
-      starts: previous.starts,
-      longest: longestOf(previous.intervals),
-      avgTemp: timeWeightedMean(control, window.prevFrom, window.prevTo),
-    },
+    prev: totals(previous, window.prevFrom, window.prevTo),
+    prevFull: totals(previousFull, window.prevFrom, window.prevFullTo),
     avgTemp: timeWeightedMean(control, window.from, now),
+    elapsed: now - window.from,
+    dataDays,
+    periodDays,
+    finishedWithData,
     days: days.map((start) => ({ start, runtime: overlap(all.intervals, start, start + DAY) })),
     setpoint: thin(setpoint.filter((p) => p.t >= window.from)),
     temperature: thin(control.filter((p) => p.t >= window.from)),
     rooms,
-    heatingRate: rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : undefined,
+    heatingRate: hours > 0 ? rise / hours : undefined,
     lastWarmUp,
-    events: events.slice(0, 5),
+    events: events.slice(0, 20),
     empty: !pump.length && !control.length,
     fetchedAt: Date.now(),
     pumpChanged: hass.states[ids.pump]?.last_changed ?? "",

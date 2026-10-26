@@ -27,6 +27,7 @@ const log: string[] = [];
 function resetScene(next: Scene): void {
   scene = next;
   width = next.width ?? 440;
+  height = next.height ?? 0;
   values = Object.fromEntries(next.controls.map((c) => [c.key, c.value]));
   configText = JSON.stringify(next.config, null, 2);
   configError = false;
@@ -45,7 +46,7 @@ function buildHass(): HomeAssistant {
     formatEntityState: (st) => st.state,
     async callWS<T>(message: Record<string, unknown>): Promise<T> {
       if (message.type !== "history/history_during_period") throw new Error("unsupported");
-      const custom = scene.history?.(message);
+      const custom = scene.history?.(message, values);
       if (custom) return custom as T;
       const start = Date.parse(message.start_time as string) / 1000;
       const step = (Date.parse(message.end_time as string) / 1000 - start) / 96;

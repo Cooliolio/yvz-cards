@@ -7,14 +7,23 @@ export interface Bar {
   value: number;
   // What a screen reader and the hover title say.
   text?: string;
-  // The bar for "now"; drawn in the state colour while the others are muted.
+  // Short text above the bar, e.g. "3.4 h"; leave empty for none.
+  display?: string;
+  // The bar for "now"; drawn in the full state colour while the others are muted.
   current?: boolean;
+  // A day that isn't over yet: hatched, because its bar will still grow.
+  partial?: boolean;
 }
+
+const VALUE_HEIGHT = 16;
+// Above this many bars the values would collide, so only the labels thin out and values hide.
+const MAX_WITH_VALUES = 14;
 
 // A row of vertical bars with a label under each; thin bars skip labels so they never overlap.
 @customElement("yvz-bars")
 export class YvzBars extends LitElement {
   @property({ attribute: false }) bars: Bar[] = [];
+  // The value a full-height bar stands for. Larger than the biggest bar keeps a single active day from filling the chart.
   @property({ type: Number }) max?: number;
   @property({ type: Number }) height = 96;
 
@@ -36,13 +45,26 @@ export class YvzBars extends LitElement {
       .col {
         display: flex;
         flex: 1;
-        align-items: flex-end;
+        flex-direction: column;
+        justify-content: flex-end;
+        align-items: stretch;
         min-width: 0;
         height: 100%;
       }
 
+      .value {
+        height: ${VALUE_HEIGHT}px;
+        overflow: visible;
+        color: var(--yvz-text-muted);
+        font-size: var(--yvz-text-caption);
+        font-variant-numeric: tabular-nums;
+        line-height: ${VALUE_HEIGHT}px;
+        text-align: center;
+        white-space: nowrap;
+      }
+
       .bar {
-        width: 100%;
+        height: calc((100% - var(--_valueh)) * var(--_ratio));
         min-height: 2px;
         border-radius: 3px 3px 1px 1px;
         background: color-mix(in srgb, var(--yvz-state, var(--yvz-accent)) 45%, transparent);
@@ -51,9 +73,20 @@ export class YvzBars extends LitElement {
           background var(--yvz-duration-base) var(--yvz-ease);
       }
 
-      .col:hover .bar,
+      .col:hover .bar {
+        background: var(--yvz-state, var(--yvz-accent));
+      }
+
       .bar.current {
         background: var(--yvz-state, var(--yvz-accent));
+      }
+
+      .bar.partial {
+        background: repeating-linear-gradient(
+          135deg,
+          color-mix(in srgb, var(--yvz-state, var(--yvz-accent)) 70%, transparent) 0 3px,
+          color-mix(in srgb, var(--yvz-state, var(--yvz-accent)) 22%, transparent) 3px 6px
+        );
       }
 
       .labels {
@@ -76,14 +109,19 @@ export class YvzBars extends LitElement {
   ];
 
   protected override render() {
-    const top = this.max ?? Math.max(...this.bars.map((b) => b.value), 0);
-    const thin = this.bars.length > 14;
+    const top = Math.max(this.max ?? 0, ...this.bars.map((b) => b.value), 0);
+    const thin = this.bars.length > MAX_WITH_VALUES;
     const step = Math.ceil(this.bars.length / 6);
     return html`
-      <div class="row" role="list" style="--_height: ${this.height}px; --_gap: ${thin ? 2 : 6}px">
+      <div
+        class="row"
+        role="list"
+        style="--_height: ${this.height}px; --_gap: ${thin ? 2 : 6}px; --_valueh: ${thin ? 0 : VALUE_HEIGHT}px"
+      >
         ${this.bars.map(
           (b) => html`<div class="col" role="listitem" title=${b.text ?? String(b.value)} aria-label=${b.text ?? String(b.value)}>
-            <div class="bar ${b.current ? "current" : ""}" style="height: ${top > 0 ? Math.max(0, (b.value / top) * 100) : 0}%"></div>
+            ${thin ? "" : html`<div class="value">${b.display ?? ""}</div>`}
+            <div class="bar ${b.current ? "current" : ""} ${b.partial ? "partial" : ""}" style="--_ratio: ${top > 0 ? Math.max(0, b.value / top) : 0}"></div>
           </div>`,
         )}
       </div>

@@ -13,6 +13,8 @@ export class YvzStat extends LitElement {
   // Already formatted, e.g. "12 min"; leave empty to hide the change.
   @property() delta = "";
   @property() trend: StatTrend = "flat";
+  // A quieter line under the change, e.g. a percentage.
+  @property() note = "";
 
   static override styles = [
     designStyles,
@@ -64,6 +66,13 @@ export class YvzStat extends LitElement {
         white-space: nowrap;
       }
 
+      .note {
+        color: var(--yvz-text-muted);
+        font-size: var(--yvz-text-label);
+        line-height: var(--yvz-line-label);
+        white-space: nowrap;
+      }
+
       .arrow {
         font-size: 8px;
       }
@@ -76,6 +85,7 @@ export class YvzStat extends LitElement {
       <div class="label">${this.label}</div>
       <div class="value">${this.value}${this.unit && this.value !== "–" ? html`<small>${this.unit}</small>` : nothing}</div>
       <div class="delta">${this.delta ? html`<span class="arrow" aria-hidden="true">${arrow}</span>${this.delta}` : nothing}</div>
+      ${this.note ? html`<div class="note">${this.note}</div>` : nothing}
     `;
   }
 }

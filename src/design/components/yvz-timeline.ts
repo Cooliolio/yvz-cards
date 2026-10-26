@@ -155,9 +155,15 @@ export class YvzTimeline extends LitElement {
     const stripH = 12;
     const gap = 8;
     const plot = this.height - stripH - gap;
-    const all = [...this.temperature, ...this.setpoint].map((p) => p.v);
-    const lo = all.length ? Math.floor(Math.min(...all) - 0.5) : 0;
-    const hi = all.length ? Math.ceil(Math.max(...all) + 0.5) : 1;
+    // The scale follows the room line. A target outside it (a frost setpoint) is clipped, not stretched to.
+    const own = this.temperature.length ? this.temperature : this.setpoint;
+    const all = own.map((p) => p.v);
+    let lo = all.length ? Math.floor(Math.min(...all) - 0.25) : 0;
+    let hi = all.length ? Math.ceil(Math.max(...all) + 0.25) : 1;
+    if (hi - lo < 2) {
+      lo -= 1;
+      hi += 1;
+    }
     const y = (v: number) => 2 + (1 - (v - lo) / (hi - lo || 1)) * (plot - 4);
     const line = (pts: TimelinePoint[], stepped = false): string =>
       pts
@@ -181,9 +187,12 @@ export class YvzTimeline extends LitElement {
         @pointermove=${this.onMove}
         @pointerleave=${() => (this.hover = undefined)}
       >
+        <defs>
+          <clipPath id="plot"><rect x="0" y="0" width="100" height=${plot}></rect></clipPath>
+        </defs>
         <line class="grid" x1="0" x2="100" y1=${y(hi)} y2=${y(hi)}></line>
         <line class="grid" x1="0" x2="100" y1=${y(lo)} y2=${y(lo)}></line>
-        ${this.setpoint.length ? svg`<path class="set" d=${line(this.setpoint, true)}></path>` : nothing}
+        ${this.setpoint.length ? svg`<g clip-path="url(#plot)"><path class="set" d=${line(this.setpoint, true)}></path></g>` : nothing}
         ${this.temperature.length ? svg`<path class="temp" d=${line(this.temperature)}></path>` : nothing}
         <rect class="strip" x="0" y=${plot + gap} width="100" height=${stripH} rx="1.5"></rect>
         ${this.runs.map(

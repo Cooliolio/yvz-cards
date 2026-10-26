@@ -22,6 +22,15 @@ export class YvzHeatingStatsCardEditor extends YvzCardEditor<HeatingStatsConfig>
       { name: "name", selector: { text: {} } },
       { name: "compact", selector: { boolean: {} } },
       {
+        name: "compare",
+        selector: {
+          select: {
+            mode: "dropdown",
+            options: ["same_time", "full_day"].map((value) => ({ value, label: this.t(`hstats.compare.${value}` as TranslationKey) })),
+          },
+        },
+      },
+      {
         name: "period",
         selector: {
           select: {

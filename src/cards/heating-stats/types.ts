@@ -25,6 +25,8 @@ export const STATS_LONG_TERM = {
   starts_yesterday: "sensor.heating_pump_starts_yesterday",
   starts_week: "sensor.heating_pump_starts_week",
   starts_month: "sensor.heating_pump_starts_month",
+  runtime_season: "sensor.heating_pump_runtime_season",
+  starts_season: "sensor.heating_pump_starts_season",
 } as const;
 
 export type StatsEntityKey = keyof typeof STATS_ENTITIES;
@@ -33,9 +35,13 @@ export type StatsLongTermKey = keyof typeof STATS_LONG_TERM;
 export const PERIODS = ["today", "week", "month"] as const;
 export type Period = (typeof PERIODS)[number];
 
+// What today is compared with: yesterday up to the same time of day, or all of yesterday.
+export type CompareMode = "same_time" | "full_day";
+
 export type HeatingStatsConfig = LovelaceCardConfig & {
   name?: string;
   compact?: boolean;
+  compare?: CompareMode;
   // Period shown first; the last one picked is remembered per card in this browser.
   period?: Period;
 } & Partial<Record<StatsEntityKey | StatsLongTermKey, string>>;
@@ -54,5 +60,7 @@ export const STATS_GROUPS: Record<string, (StatsEntityKey | StatsLongTermKey)[]>
     "starts_yesterday",
     "starts_week",
     "starts_month",
+    "runtime_season",
+    "starts_season",
   ],
 };
