@@ -1,12 +1,13 @@
 # YVZ Cards
 
-Custom Home Assistant dashboard cards with one shared look: a stove remote, a server panel and a heating thermostat. Every card has a visual editor and is translated into English, Dutch and Turkish; the language follows your Home Assistant profile.
+Custom Home Assistant dashboard cards with one shared look: a stove remote, a server panel, a heating thermostat and a Tesla. Every card has a visual editor and is translated into English, Dutch and Turkish; the language follows your Home Assistant profile.
 
 | Card | Type | What it does |
 |---|---|---|
 | [Stove](#stove-card) | `custom:yvz-stove-card` | Status and remote for a (pellet) stove: power, temperature and fan steps |
 | [Host](#host-card) | `custom:yvz-host-card` | Server panel: CPU, memory, temperatures, storage, network, details and a list of guests |
 | [Heating](#heating-card) | `custom:yvz-heating-card` | Thermostat dial with on/off, Eco/Comfort/Boost and a room picker for the leading sensor |
+| [Tesla](#tesla-card) | `custom:yvz-tesla-card` | Battery, range and charging, climate, charge limit and car controls, or a status-only compact card |
 
 ## Installation
 
@@ -154,6 +155,37 @@ How it works:
 
 > **Upgrading from the old standalone heating card:** remove its `yvz-heating-card.js` resource first. Both register the same card name, and if the old one loads first the whole YVZ Cards bundle fails to load.
 
+## Tesla card
+
+```yaml
+type: custom:yvz-tesla-card
+device_id: 5116023991b66b7416e685dff829941f
+```
+
+For the **Tesla Fleet** and **Teslemetry** integrations. Pick your car and every entity is found automatically by its translation key; without `device_id` the first Tesla with a battery sensor is used.
+
+| Option | Default | Description |
+|---|---|---|
+| `device_id` | first Tesla found | The car. |
+| `name` | device name | Card title. |
+| `compact` | `false` | Status only: car, battery, range, charging and quick-glance chips. No climate, charge limit or controls. |
+| `paint` | `stealth_grey` | `stealth_grey`, `pearl_white`, `quicksilver`, `diamond_black`, `ultra_red`, `deep_blue` or `custom`. |
+| `paint_rgb` | | `[r, g, b]`, for `paint: custom`. |
+| `controls` | lock, defrost, seats, steering, sentry, charge port, frunk, trunk, flash | Tiles to show: `defrost`, `seat_left`, `seat_right`, `steering`, `charge_switch`, `charge_port`, `lock`, `sentry`, `frunk`, `trunk`, `windows`, `flash`, `honk`, `wake`. |
+| `show_climate` | `true` | Climate on/off and target temperature. |
+| `show_charge_limit` | `true` | Charge limit slider. |
+| `entities` | | Override any entity found automatically, by key (see the visual editor). |
+| `prefix` | | Legacy fallback: builds ids like `sensor.model_3_battery_level`. |
+
+- The battery line turns green and pulses while charging, solid green when complete, amber when plugged in but not charging below the limit, and red when the charger has no power. The marker on the line is the charge limit.
+- The car shows what is going on: lids and windows opening, the cable with current flowing while charging, an orange glow and rising heat with the climate on, wisps on the windows while defrosting, "z"s while asleep, blinking lights when it locks or unlocks.
+- Chips sit under the battery in one line of fixed height: what the car is doing (parked, driving, asleep), plus anything unlocked, open, a tyre warning, an update or sentry. Locked and the inside temperature are in the subtitle.
+- Controls are grouped into Climate, Charging, Security and Actions. Heaters show their level as dots. Lock, frunk, trunk, charge port, windows and honk need a second tap to confirm.
+- Hold −/+ to keep stepping the target temperature; several taps are sent as one command.
+- **Settings** (cog): choose which controls and panels show. Saved in this browser only, and overrides `controls` until you reset it.
+- While driving, the card shows speed and gear and hides climate and controls.
+- Tap the car while it is asleep, twice, to wake it. A banner warns when the car's data is more than three hours old.
+
 ## Colours
 
 The cards colour themselves by state. You can override any state colour in your theme or with card-mod:
@@ -162,6 +194,7 @@ The cards colour themselves by state. You can override any state colour in your 
 --yvz-on-color: "#5cc98a"
 --yvz-standby-color: "#4f8fe8"
 --yvz-pending-color: "#f5a623"
+--yvz-heat-color: "#ff7a45"
 --yvz-error-color: "#e0434f"
 --yvz-off-color: "#6b7280"
 ```

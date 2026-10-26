@@ -48,6 +48,10 @@ export class YvzGauge extends LitElement {
   @property() display = "";
   @property() tone?: YvzState;
   @property() icon = "";
+  // Something is actively filling it (e.g. charging): green, and the fill breathes.
+  @property({ type: Boolean, reflect: true }) pulse = false;
+  // Same green without the animation, for a finished state.
+  @property({ type: Boolean, reflect: true }) done = false;
 
   private tween = new NumberTween(this);
 
@@ -78,6 +82,36 @@ export class YvzGauge extends LitElement {
       :host([data-state="unavailable"]) {
         --_tone: var(--yvz-text-muted);
         --_value: var(--yvz-text-muted);
+      }
+
+      :host([pulse]),
+      :host([done]) {
+        --_tone: var(--yvz-on);
+        --_icon: var(--yvz-on);
+      }
+
+      :host([pulse]) .fill,
+      :host([pulse]) .segments i.lit {
+        animation: breathe 1.6s ease-in-out infinite;
+      }
+
+      @keyframes breathe {
+        0%,
+        100% {
+          opacity: 1;
+          box-shadow: 0 0 8px var(--yvz-on-strong);
+        }
+        50% {
+          opacity: 0.55;
+          box-shadow: 0 0 0 transparent;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        :host([pulse]) .fill,
+        :host([pulse]) .segments i.lit {
+          animation: none;
+        }
       }
 
       .name {

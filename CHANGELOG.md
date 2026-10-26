@@ -2,6 +2,31 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.6.0 — 2026-10-26
+
+### Added
+
+- **Tesla card** (`custom:yvz-tesla-card`), rebuilt from the standalone Tesla Hub card on the shared design system, for Tesla Fleet and Teslemetry.
+  - Car in your paint colour that shows its state: lids and windows opening, the charge cable with current flowing, sentry, spinning wheels and wind while driving, an orange glow and rising heat with the climate on, wisps on the windows while defrosting, "z"s while asleep, and blinking lights when it locks, unlocks or flashes.
+  - Battery line with the charge limit as a marker. Charging pulses green, complete is solid green, plugged in but not charging is amber while below the limit, and no power at the charger is red. Charging shows power, finish time and energy added.
+  - Climate on/off with target temperature (hold −/+ to keep stepping), a charge limit slider, and grouped control tiles (Climate, Charging, Security, Actions). Heater levels are dots. Risky controls need a second tap.
+  - Chips in one fixed-height line under the battery, so nothing moves when they change. Locked and the inside temperature are in the subtitle.
+  - Settings view behind the cog to choose which controls and panels show, stored per browser.
+  - `compact` option: status only, with no controls.
+  - Driving view with speed and gear. Banner when the car's data is old. Tap the sleeping car twice to wake it.
+  - Visual editor, entities found automatically from the chosen car, English, Dutch and Turkish.
+- Design components: `yvz-slider`.
+- `heat` state colour (`--yvz-heat-color`, orange) for active heating and warming.
+- `steps` and `level` on `yvz-tile`, to show a level as dots.
+- `pulse` and `done` options on `yvz-gauge` for a filling or finished state.
+- `repeat` option on `yvz-stepper`: hold − or + to keep stepping. The heating settings use it.
+- `--yvz-tile-padding`, `--yvz-tile-value-size` and `--yvz-tile-value-line` on `yvz-tile`, for smaller tiles.
+- Playground: a Tesla scene with the compact card underneath, scenes can now show extra cards, and the gallery shows the slider and the new gauge states.
+
+### Changed
+
+- The heating card's settings view now shares its slide and height animation with the Tesla card.
+
 ## 0.5.0 — 2026-10-26
 
 ### Added

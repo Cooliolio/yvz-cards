@@ -1,5 +1,6 @@
 import { css, html, LitElement, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
+import { HoldRepeat } from "../hold-repeat";
 import { designStyles } from "../styles";
 import type { ButtonStatus } from "./yvz-button";
 
@@ -13,6 +14,19 @@ export class YvzStepper extends LitElement {
   @property({ attribute: "increase-label" }) increaseLabel = "";
   @property({ type: Boolean, reflect: true }) disabled = false;
   @property({ reflect: true }) status: ButtonStatus = "idle";
+  // While a button is held, keeps firing yvz-step (the first one comes from the click itself).
+  @property({ type: Boolean }) repeat = false;
+
+  private direction: StepDirection = 1;
+  private hold = new HoldRepeat(this, () => this.repeat && !this.disabled);
+
+  constructor() {
+    super();
+    this.addEventListener("yvz-repeat", (e) => {
+      e.stopPropagation();
+      this.step(this.direction);
+    });
+  }
 
   static override styles = [
     designStyles,
@@ -83,6 +97,11 @@ export class YvzStepper extends LitElement {
     `,
   ];
 
+  private press(direction: StepDirection): void {
+    this.direction = direction;
+    this.hold.start();
+  }
+
   private step(direction: StepDirection): void {
     this.dispatchEvent(
       new CustomEvent<{ direction: StepDirection }>("yvz-step", {
@@ -99,6 +118,10 @@ export class YvzStepper extends LitElement {
         type="button"
         ?disabled=${this.disabled}
         aria-label=${this.decreaseLabel || nothing}
+        @pointerdown=${() => this.press(-1)}
+        @pointerup=${this.hold.release}
+        @pointerleave=${this.hold.abandon}
+        @pointercancel=${this.hold.abandon}
         @click=${() => this.step(-1)}
       >
         <ha-icon icon="mdi:minus"></ha-icon>
@@ -110,6 +133,10 @@ export class YvzStepper extends LitElement {
         type="button"
         ?disabled=${this.disabled}
         aria-label=${this.increaseLabel || nothing}
+        @pointerdown=${() => this.press(1)}
+        @pointerup=${this.hold.release}
+        @pointerleave=${this.hold.abandon}
+        @pointercancel=${this.hold.abandon}
         @click=${() => this.step(1)}
       >
         <ha-icon icon="mdi:plus"></ha-icon>

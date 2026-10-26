@@ -207,6 +207,14 @@ export class YvzGaugeGallery extends LitElement {
           invert
         ></yvz-gauge>`,
       ])}
+      ${this.section("charging · pulse and done", [
+        html`<yvz-gauge icon="mdi:lightning-bolt" label="Charging" .value=${n("battery")} .warnAt=${40} .errorAt=${20} invert pulse></yvz-gauge>`,
+        html`<yvz-gauge icon="mdi:battery-check" label="Complete" .value=${100} .warnAt=${40} .errorAt=${20} invert done></yvz-gauge>`,
+      ])}
+      ${this.section("slider", [
+        [html`<yvz-slider label="Charge limit" .min=${50} .max=${100} .value=${n("limit") ?? 80}></yvz-slider>`, "wide"],
+        [html`<yvz-slider label="Disabled" .value=${40} disabled></yvz-slider>`, "wide"],
+      ])}
       ${this.section("stacked", [
         [
           html`<yvz-stack

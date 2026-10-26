@@ -1,4 +1,5 @@
-import type { HassEntity } from "../src/shared/types";
+import { TESLA_ENTITIES, type TeslaEntityKey } from "../src/cards/tesla/types";
+import type { HassDevice, HassEntity, HassEntityRegistryEntry } from "../src/shared/types";
 
 export type ControlValue = string | number | boolean;
 
@@ -18,8 +19,12 @@ export interface Scene {
   tag: string;
   width?: number;
   config: Record<string, unknown>;
+  // More cards of the same type shown below the first, sharing its state.
+  extra?: Record<string, unknown>[];
   controls: Control[];
   states(values: Record<string, ControlValue>): Record<string, HassEntity>;
+  // For cards that look entities up in the registry instead of taking ids.
+  registry?: { entities: Record<string, HassEntityRegistryEntry>; devices: Record<string, HassDevice> };
   // Lets service calls change the controls, standing in for HA automations.
   service?(
     domain: string,
@@ -106,6 +111,7 @@ const gauges: Scene = {
     gaugeControl("chipset", "Chipset temp", 72, 20, 100),
     gaugeControl("case", "Case temp", 36, 20, 80),
     gaugeControl("battery", "Battery", 30),
+    gaugeControl("limit", "Slider", 80, 50, 100),
     gaugeControl("lvm", "local-lvm", 44),
     gaugeControl("rec", "Recordings", 71),
     gaugeControl("viewers", "Jellyfin viewers", 2, 0, 10),
@@ -350,4 +356,194 @@ const heating: Scene = {
   },
 };
 
-export const scenes: Scene[] = [host, heating, stove, gauges];
+const TESLA_DEVICE = "tesla-device";
+const TESLA_PREFIX = "oprit_tesla_model_3_";
+
+// Object ids as the integration creates them for the Model 3; the card finds them by translation_key.
+const TESLA_IDS: Partial<Record<TeslaEntityKey, string>> = {
+  battery: "battery_level",
+  range: "battery_range",
+  charging: "charging",
+  time_to_full: "time_to_full_charge",
+  charger_power: "charger_power",
+  energy_added: "charge_energy_added",
+  charge_limit: "charge_limit",
+  cable: "charge_cable",
+  inside_temp: "inside_temperature",
+  outside_temp: "outside_temperature",
+  climate: "climate",
+  lock: "lock",
+  location: "location",
+  status: "status",
+  update: "update",
+  charge_switch: "charge",
+  defrost: "defrost",
+  sentry: "sentry_mode",
+  seat_left: "seat_heater_front_left",
+  seat_right: "seat_heater_front_right",
+  steering: "steering_wheel_heater",
+  charge_port: "charge_port_door",
+  frunk: "frunk",
+  trunk: "trunk",
+  windows: "windows",
+  flash: "flash_lights",
+  honk: "honk_horn",
+  wake: "wake",
+  tpms_fl: "tire_pressure_warning_front_left",
+  door_df: "front_driver_door",
+  door_dr: "rear_driver_door",
+  door_pf: "front_passenger_door",
+  door_pr: "rear_passenger_door",
+  win_fd: "front_driver_window",
+  win_fp: "front_passenger_window",
+  win_rd: "rear_driver_window",
+  win_rp: "rear_passenger_window",
+  shift: "shift_state",
+  speed: "speed",
+};
+
+const teslaId = (key: TeslaEntityKey) => `${TESLA_ENTITIES[key].domain}.${TESLA_PREFIX}${TESLA_IDS[key]}`;
+const TESLA_KEYS = Object.keys(TESLA_IDS) as TeslaEntityKey[];
+
+const teslaRegistry = {
+  entities: Object.fromEntries(
+    TESLA_KEYS.map((key) => [
+      teslaId(key),
+      {
+        entity_id: teslaId(key),
+        device_id: TESLA_DEVICE,
+        platform: "tesla_fleet",
+        translation_key: TESLA_ENTITIES[key].translationKey,
+      },
+    ]),
+  ),
+  devices: { [TESLA_DEVICE]: { name: "Tesla Model 3" } },
+};
+
+const HEAT = ["off", "low", "medium", "high"];
+const teslaCheck = (key: string, label: string, value = false): Control => ({ key, label, type: "checkbox", value });
+const teslaSelect = (key: string, label: string, value: string, options: string[]): Control => ({
+  key,
+  label,
+  type: "select",
+  value,
+  options,
+});
+
+const tesla: Scene = {
+  name: "Tesla",
+  tag: "yvz-tesla-card",
+  width: 440,
+  config: { type: "custom:yvz-tesla-card", device_id: TESLA_DEVICE },
+  extra: [{ type: "custom:yvz-tesla-card", device_id: TESLA_DEVICE, compact: true }],
+  registry: teslaRegistry,
+  controls: [
+    teslaSelect("status", "Car", "on", ["on", "off", "unavailable"]),
+    gaugeControl("age", "Last update (min ago)", 2, 0, 600),
+    teslaSelect("location", "Location", "home", ["home", "not_home", "Work", "none"]),
+    gaugeControl("battery", "Battery (%)", 64),
+    gaugeControl("range", "Range (km)", 281, 0, 500),
+    teslaSelect("charging", "Charging", "disconnected", ["disconnected", "stopped", "starting", "charging", "complete", "no_power"]),
+    teslaCheck("cable", "Cable plugged in"),
+    gaugeControl("power", "Charger power (kW)", 11, 0, 250, 0.1),
+    gaugeControl("added", "Energy added (kWh)", 18.4, 0, 100, 0.1),
+    gaugeControl("minutesToFull", "Time to full (min)", 80, 0, 600),
+    gaugeControl("limit", "Charge limit (%)", 80, 50, 100),
+    teslaSelect("climate", "Climate", "off", ["off", "heat_cool", "unavailable"]),
+    gaugeControl("target", "Climate target (°C)", 21, 15, 28, 0.5),
+    gaugeControl("inside", "Inside (°C)", 19, -10, 50),
+    gaugeControl("outside", "Outside (°C)", 12, -20, 45),
+    teslaSelect("lock", "Lock", "locked", ["locked", "unlocked"]),
+    teslaCheck("sentry", "Sentry mode"),
+    teslaCheck("defrost", "Defrost"),
+    teslaSelect("seat_left", "Seat heater L", "off", HEAT),
+    teslaSelect("seat_right", "Seat heater R", "off", HEAT),
+    teslaSelect("steering", "Steering wheel heater", "off", HEAT.filter((h) => h !== "medium")),
+    teslaSelect("charge_port", "Charge port", "closed", ["closed", "open"]),
+    teslaSelect("frunk", "Frunk", "closed", ["closed", "open"]),
+    teslaSelect("trunk", "Trunk", "closed", ["closed", "open"]),
+    teslaSelect("windows", "Windows", "closed", ["closed", "open"]),
+    teslaCheck("door", "Door open"),
+    teslaCheck("tires", "Tyre pressure warning"),
+    teslaCheck("update", "Update available"),
+    teslaSelect("shift", "Gear", "p", ["p", "d", "r", "n"]),
+    gaugeControl("speed", "Speed (km/h)", 50, 0, 160),
+  ],
+  states(v) {
+    const n = (key: string) => Number(v[key]);
+    const flag = (key: string) => (v[key] ? "on" : "off");
+    const minutes = (key: string) => n(key) * 60_000;
+    const driving = v.status === "on" && v.shift !== "p";
+    const unit = (key: TeslaEntityKey, state: string | number, unitOfMeasurement: string) =>
+      entity(teslaId(key), String(state), { unit_of_measurement: unitOfMeasurement });
+    const list = [
+      entity(teslaId("status"), String(v.status), { device_class: "connectivity" }),
+      { ...unit("battery", n("battery"), "%"), last_updated: new Date(Date.now() - minutes("age")).toISOString() },
+      unit("range", n("range"), "km"),
+      entity(teslaId("charging"), String(v.charging)),
+      entity(teslaId("cable"), flag("cable")),
+      unit("charger_power", n("power"), "kW"),
+      unit("energy_added", n("added"), "kWh"),
+      entity(
+        teslaId("time_to_full"),
+        v.charging === "charging" ? new Date(Date.now() + minutes("minutesToFull")).toISOString() : "unknown",
+        { device_class: "timestamp" },
+      ),
+      entity(teslaId("charge_limit"), String(v.limit), { min: 50, max: 100, step: 1, unit_of_measurement: "%" }),
+      entity(teslaId("charge_switch"), v.charging === "charging" ? "on" : "off"),
+      unit("inside_temp", n("inside"), "°C"),
+      unit("outside_temp", n("outside"), "°C"),
+      entity(teslaId("climate"), String(v.climate), {
+        temperature: n("target"),
+        min_temp: 15,
+        max_temp: 28,
+        target_temp_step: 0.5,
+      }),
+      entity(teslaId("lock"), String(v.lock)),
+      entity(teslaId("sentry"), flag("sentry")),
+      entity(teslaId("defrost"), flag("defrost")),
+      entity(teslaId("seat_left"), String(v.seat_left), { options: HEAT }),
+      entity(teslaId("seat_right"), String(v.seat_right), { options: HEAT }),
+      entity(teslaId("steering"), String(v.steering), { options: ["off", "low", "high"] }),
+      entity(teslaId("charge_port"), String(v.charge_port)),
+      entity(teslaId("frunk"), String(v.frunk)),
+      entity(teslaId("trunk"), String(v.trunk)),
+      entity(teslaId("windows"), String(v.windows)),
+      entity(teslaId("update"), flag("update")),
+      entity(teslaId("tpms_fl"), flag("tires")),
+      entity(teslaId("door_df"), flag("door")),
+      entity(teslaId("door_dr"), "off"),
+      entity(teslaId("door_pf"), "off"),
+      entity(teslaId("door_pr"), "off"),
+      ...(["win_fd", "win_fp", "win_rd", "win_rp"] as const).map((k) =>
+        entity(teslaId(k), v.windows === "open" ? "on" : "off"),
+      ),
+      entity(teslaId("shift"), String(v.shift)),
+      unit("speed", driving ? n("speed") : 0, "km/h"),
+      entity(teslaId("flash"), "unknown"),
+      entity(teslaId("honk"), "unknown"),
+      entity(teslaId("wake"), "unknown"),
+      ...(v.location === "none" ? [] : [entity(teslaId("location"), String(v.location))]),
+    ];
+    return Object.fromEntries(list.map((e) => [e.entity_id, e]));
+  },
+  service(domain, service, data): Record<string, ControlValue> | void {
+    const key = TESLA_KEYS.find((k) => teslaId(k) === data.entity_id);
+    if (!key) return;
+    if (domain === "lock") return { lock: service === "lock" ? "locked" : "unlocked" };
+    if (domain === "switch" && key === "charge_switch") {
+      return { charging: service === "turn_on" ? "charging" : "stopped" };
+    }
+    if (domain === "switch") return { [key]: service === "turn_on" };
+    if (domain === "select") return { [key]: String(data.option) };
+    if (domain === "cover") return { [key]: service === "open_cover" ? "open" : "closed" };
+    if (domain === "number") return { limit: Number(data.value) };
+    if (domain === "climate") {
+      if (service === "set_temperature") return { target: Number(data.temperature) };
+      return { climate: service === "turn_on" ? "heat_cool" : "off" };
+    }
+    if (domain === "button" && key === "wake") return { status: "on", age: 0 };
+  },
+};
+
+export const scenes: Scene[] = [host, heating, tesla, stove, gauges];

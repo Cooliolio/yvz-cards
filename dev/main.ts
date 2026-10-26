@@ -19,7 +19,7 @@ let width = 440;
 let failServices = false;
 let configText = "";
 let configError = false;
-let card: CardElement | undefined;
+let cards: CardElement[] = [];
 let cardTag = "";
 const log: string[] = [];
 
@@ -29,13 +29,15 @@ function resetScene(next: Scene): void {
   values = Object.fromEntries(next.controls.map((c) => [c.key, c.value]));
   configText = JSON.stringify(next.config, null, 2);
   configError = false;
-  card = undefined;
+  cards = [];
 }
 
 function buildHass(): HomeAssistant {
   const states = scene.states(values);
   return {
     states,
+    entities: scene.registry?.entities,
+    devices: scene.registry?.devices,
     language,
     locale: { language, time_format: "language" },
     config: { time_zone: "Europe/Brussels" },
@@ -66,23 +68,29 @@ function buildHass(): HomeAssistant {
 }
 
 function syncCard(stage: HTMLElement): void {
-  if (!card || cardTag !== scene.tag) {
+  if (!cards.length || cardTag !== scene.tag) {
     stage.replaceChildren();
-    card = document.createElement(scene.tag) as CardElement;
+    cards = [scene.tag, ...(scene.extra ?? []).map(() => scene.tag)].map((tag) => {
+      const el = document.createElement(tag) as CardElement;
+      stage.append(el);
+      return el;
+    });
     cardTag = scene.tag;
-    stage.append(card);
     applyConfig();
   }
-  card.hass = buildHass();
+  const hass = buildHass();
+  for (const el of cards) el.hass = hass;
 }
 
 function applyConfig(): void {
   try {
-    card?.setConfig(JSON.parse(configText));
+    cards[0]?.setConfig(JSON.parse(configText));
     configError = false;
   } catch {
     configError = true;
   }
+  // Variants shown under the main card, e.g. the compact layout.
+  (scene.extra ?? []).forEach((config, i) => cards[i + 1]?.setConfig(config));
 }
 
 function renderControl(c: Control) {

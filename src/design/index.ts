@@ -32,3 +32,4 @@ import "./components/yvz-section-title";
 import "./components/yvz-segmented";
 import "./components/yvz-tile";
 import "./components/yvz-setting-row";
+import "./components/yvz-slider";

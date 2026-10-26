@@ -2,7 +2,8 @@ import { css, html, nothing, type CSSResultGroup, type TemplateResult } from "li
 import { customElement, state } from "lit/decorators.js";
 import "../../design";
 import type { SegmentOption, TileBadge, YvzState } from "../../design";
-import { NumberTween, reducedMotion } from "../../design/tween";
+import { NumberTween } from "../../design/tween";
+import { animateHeight, viewSwapStyles } from "../../design/view-swap";
 import { runAction } from "../../shared/actions";
 import { formatDuration, formatNumber } from "../../shared/format";
 import { haptic } from "../../shared/haptic";
@@ -182,22 +183,13 @@ export class YvzHeatingCard extends YvzCard<HeatingCardConfig> {
     }
   }
 
-  // Swaps views and eases the card between the two heights instead of letting it jump.
   private async toggleView(): Promise<void> {
     const card = this.renderRoot.querySelector<HTMLElement>("ha-card");
     const from = card?.offsetHeight ?? 0;
     this.switched = true;
     this.view = this.view === "main" ? "settings" : "main";
     await this.updateComplete;
-    const to = card?.offsetHeight ?? 0;
-    if (!card || from === to || reducedMotion()) return;
-    card.animate(
-      [
-        { height: `${from}px`, overflow: "hidden" },
-        { height: `${to}px`, overflow: "hidden" },
-      ],
-      { duration: 300, easing: "ease-out" },
-    );
+    animateHeight(card, from);
   }
 
   private onRoom(name: string): void {
@@ -394,6 +386,7 @@ export class YvzHeatingCard extends YvzCard<HeatingCardConfig> {
       const v = this.settingValue(s);
       return html`<yvz-setting-row .label=${s.label} ?disabled=${disabled}>
         <yvz-stepper
+          repeat
           ?disabled=${disabled}
           .decreaseLabel=${`${s.label}: ${t("common.decrease")}`}
           .increaseLabel=${`${s.label}: ${t("common.increase")}`}
@@ -467,6 +460,7 @@ export class YvzHeatingCard extends YvzCard<HeatingCardConfig> {
 
   static override styles: CSSResultGroup = [
     YvzCard.styles,
+    viewSwapStyles,
     css`
       ha-card {
         container-type: inline-size;
@@ -480,28 +474,6 @@ export class YvzHeatingCard extends YvzCard<HeatingCardConfig> {
 
       .banners:not(:empty) {
         margin-top: var(--yvz-space-3);
-      }
-
-      @keyframes from-end {
-        from {
-          opacity: 0;
-          transform: translateX(16px);
-        }
-      }
-
-      @keyframes from-start {
-        from {
-          opacity: 0;
-          transform: translateX(-16px);
-        }
-      }
-
-      .view.from-end > * {
-        animation: from-end var(--yvz-duration-slow) var(--yvz-ease);
-      }
-
-      .view.from-start > * {
-        animation: from-start var(--yvz-duration-slow) var(--yvz-ease);
       }
 
       .main {

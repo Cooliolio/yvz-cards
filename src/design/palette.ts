@@ -6,6 +6,8 @@ export const STATE_COLORS = {
   off: "#6b7280",
   standby: "#4f8fe8",
   pending: "#f5a623",
+  // Active heating or warming, warmer than the amber of a warning.
+  heat: "#ff7a45",
   error: "#e0434f",
   unavailable: "#9ca3af",
 } as const;

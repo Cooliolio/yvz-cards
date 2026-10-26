@@ -15,6 +15,11 @@ export interface TileBadge {
 export class YvzTile extends LitElement {
   @property() label = "";
   @property() value = "";
+  // Shows this many dots instead of the value, `level` of them lit (e.g. a heater setting).
+  @property({ type: Number }) steps = 0;
+  @property({ type: Number }) level = 0;
+  // What a screen reader says for the dots.
+  @property({ attribute: "value-text" }) valueText = "";
   @property({ attribute: false }) badges: TileBadge[] = [];
   @property({ type: Boolean, reflect: true }) selected = false;
   @property({ type: Boolean, reflect: true }) disabled = false;
@@ -38,7 +43,7 @@ export class YvzTile extends LitElement {
         gap: var(--yvz-space-2);
         width: 100%;
         min-height: var(--yvz-tile-height, 76px);
-        padding: var(--yvz-space-3);
+        padding: var(--yvz-tile-padding, var(--yvz-space-3));
         border: 0;
         border-radius: var(--yvz-radius-md);
         background: var(--yvz-surface-raised);
@@ -123,22 +128,49 @@ export class YvzTile extends LitElement {
         color: inherit;
       }
 
+      .dots {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        height: var(--yvz-tile-value-line, var(--yvz-line-value));
+      }
+
+      .dots i {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+        opacity: 0.25;
+        transition: opacity var(--yvz-duration-base) var(--yvz-ease);
+      }
+
+      .dots i.lit {
+        opacity: 1;
+      }
+
       .value {
-        font-size: var(--yvz-text-value);
+        font-size: var(--yvz-tile-value-size, var(--yvz-text-value));
         font-weight: var(--yvz-weight-medium);
         font-variant-numeric: tabular-nums;
-        line-height: var(--yvz-line-value);
+        line-height: var(--yvz-tile-value-line, var(--yvz-line-value));
       }
     `,
   ];
 
   protected override render() {
-    return html`<button type="button" ?disabled=${this.disabled} aria-pressed=${this.selected}>
+    const aria = this.valueText ? `${this.label}: ${this.valueText}` : nothing;
+    return html`<button type="button" ?disabled=${this.disabled} aria-pressed=${this.selected} aria-label=${aria}>
       <span class="top">
         <span class="label">${this.label}</span>
         ${this.badges.map((b) => html`<ha-icon .icon=${b.icon} data-state=${b.state ?? nothing}></ha-icon>`)}
       </span>
-      ${this.value ? html`<span class="value">${this.value}</span>` : nothing}
+      ${this.steps > 0
+        ? html`<span class="dots" aria-hidden="true"
+            >${Array.from({ length: this.steps }, (_, i) => html`<i class=${i < this.level ? "lit" : ""}></i>`)}</span
+          >`
+        : this.value
+          ? html`<span class="value">${this.value}</span>`
+          : nothing}
     </button>`;
   }
 }

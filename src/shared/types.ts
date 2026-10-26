@@ -4,6 +4,19 @@ export interface HassEntity {
   attributes: Record<string, unknown>;
   last_changed: string;
   last_updated: string;
+  last_reported?: string;
+}
+
+export interface HassEntityRegistryEntry {
+  entity_id: string;
+  device_id?: string | null;
+  platform: string;
+  translation_key?: string | null;
+}
+
+export interface HassDevice {
+  name?: string | null;
+  name_by_user?: string | null;
 }
 
 export interface HassLocale {
@@ -15,6 +28,8 @@ export interface HassLocale {
 
 export interface HomeAssistant {
   states: Record<string, HassEntity>;
+  entities?: Record<string, HassEntityRegistryEntry>;
+  devices?: Record<string, HassDevice>;
   language: string;
   locale: HassLocale;
   config: { time_zone: string };
