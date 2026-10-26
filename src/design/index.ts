@@ -12,6 +12,9 @@ export type { SparkSeries } from "./components/yvz-sparkline";
 export type { BannerTone } from "./components/yvz-banner";
 export type { SegmentOption } from "./components/yvz-segmented";
 export type { TileBadge } from "./components/yvz-tile";
+export type { Bar } from "./components/yvz-bars";
+export type { StatTrend } from "./components/yvz-stat";
+export type { TimelinePoint } from "./components/yvz-timeline";
 
 import "./components/yvz-icon-badge";
 import "./components/yvz-chip";
@@ -33,3 +36,6 @@ import "./components/yvz-segmented";
 import "./components/yvz-tile";
 import "./components/yvz-setting-row";
 import "./components/yvz-slider";
+import "./components/yvz-stat";
+import "./components/yvz-bars";
+import "./components/yvz-timeline";

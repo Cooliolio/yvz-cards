@@ -3,7 +3,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import { designStyles } from "../styles";
 import type { HomeAssistant } from "../../shared/types";
 
-type HistoryItem = { s?: string; state?: string; lu?: number; last_updated?: string };
+export type HistoryItem = { s?: string; state?: string; lu?: number; last_updated?: string };
 
 export interface SparkSeries {
   entity: string;
@@ -16,7 +16,7 @@ const REFRESH_MS = 5 * 60_000;
 const BUCKETS = 60;
 
 // Averages state changes into fixed time buckets, carrying the last value through quiet ones.
-function bucket(items: HistoryItem[], start: number, end: number): number[] {
+export function bucket(items: HistoryItem[], start: number, end: number): number[] {
   const samples = items
     .map((i) => ({
       t: i.lu != null ? i.lu * 1000 : Date.parse(i.last_updated ?? ""),
@@ -53,6 +53,10 @@ export class YvzSparkline extends LitElement {
   @property({ attribute: false }) series?: SparkSeries[];
   @property({ type: Number }) hours = 24;
   @property({ type: Number }) height = 28;
+  // Pre-bucketed values (see `bucket`) to draw instead of fetching; `from` and `to` are the ms the values span.
+  @property({ attribute: false }) values?: number[];
+  @property({ type: Number }) from = 0;
+  @property({ type: Number }) to = 0;
   @property() locale = "";
   @state() private lines: number[][] = [];
   @state() private hover?: number;
@@ -156,6 +160,12 @@ export class YvzSparkline extends LitElement {
   }
 
   protected override willUpdate(): void {
+    if (this.values) {
+      this.lines = [this.values];
+      this.start = this.from;
+      this.end = this.to;
+      return;
+    }
     const list = this.list;
     if (!this.hass || !list.length) return;
     const key = `${list.map((s) => s.entity).join(",")}|${this.hours}`;

@@ -45,6 +45,8 @@ function buildHass(): HomeAssistant {
     formatEntityState: (st) => st.state,
     async callWS<T>(message: Record<string, unknown>): Promise<T> {
       if (message.type !== "history/history_during_period") throw new Error("unsupported");
+      const custom = scene.history?.(message);
+      if (custom) return custom as T;
       const start = Date.parse(message.start_time as string) / 1000;
       const step = (Date.parse(message.end_time as string) / 1000 - start) / 96;
       const history = (id: string) => {

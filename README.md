@@ -1,12 +1,14 @@
 # YVZ Cards
 
-Custom Home Assistant dashboard cards with one shared look: a stove remote, a server panel, a heating thermostat and a Tesla. Every card has a visual editor and is translated into English, Dutch and Turkish; the language follows your Home Assistant profile.
+Custom Home Assistant dashboard cards with one shared look: a stove remote, a server panel, a heating thermostat, heating statistics, a Tesla and a gauge for any entity. Every card has a visual editor and is translated into English, Dutch and Turkish; the language follows your Home Assistant profile.
 
 | Card | Type | What it does |
 |---|---|---|
 | [Stove](#stove-card) | `custom:yvz-stove-card` | Status and remote for a (pellet) stove: power, temperature and fan steps |
 | [Host](#host-card) | `custom:yvz-host-card` | Server panel: CPU, memory, temperatures, storage, network, details and a list of guests |
 | [Heating](#heating-card) | `custom:yvz-heating-card` | Thermostat dial with on/off, Eco/Comfort/Boost and a room picker for the leading sensor |
+| [Heating stats](#heating-stats-card) | `custom:yvz-heating-stats-card` | How much the heating runs and how well it works: runtime, starts, temperatures, warm-up and events |
+| [Gauge](#gauge-card) | `custom:yvz-gauge-card` | One entity as a line, segmented or stat gauge, with colour thresholds and a trend |
 | [Tesla](#tesla-card) | `custom:yvz-tesla-card` | Battery, range and charging, climate, charge limit and car controls, or a status-only compact card |
 
 ## Installation
@@ -154,6 +156,88 @@ How it works:
 - **Settings** (cog): comfort, eco, boost duration and frost protection.
 
 > **Upgrading from the old standalone heating card:** remove its `yvz-heating-card.js` resource first. Both register the same card name, and if the old one loads first the whole YVZ Cards bundle fails to load.
+
+## Heating stats card
+
+```yaml
+type: custom:yvz-heating-stats-card
+```
+
+Statistics for the heating package behind the heating card. With the same entity names it needs no configuration, and it needs no helpers either: the numbers come from the recorder's history, which is fetched once and refreshed every 5 minutes and whenever the pump switches.
+
+| Option | Default | Description |
+|---|---|---|
+| `name` | "Heating stats" | Card title. |
+| `compact` | `false` | Only the key figures and the daily bars. |
+| `period` | `today` | Period shown first: `today`, `week` or `month`. The one you pick is remembered per card, in this browser. |
+| `pump`, `climate`, `control`, `trend`, `mode`, `sensors`, `leading` | as in `heating.yaml` | Entities the card reads. |
+| `offline`, `no_warmup`, `sensor_problem`, `battery_low` | as in `heating.yaml` | Warning sensors, shown as events. |
+| `runtime_today`, `runtime_yesterday`, `runtime_week`, `runtime_month`, `starts_today`, `starts_yesterday`, `starts_week`, `starts_month` | `sensor.heating_pump_runtime_today` … | Optional long-term sensors (`history_stats`). Used when they exist; otherwise the card works it out from history. |
+
+- **Key figures** for pump runtime, number of starts, average room temperature and longest run, each with an arrow showing the change against the previous period (today is compared with yesterday up to the same time).
+- **Run timeline:** when the pump ran, with the target (dashed) and the room temperature on top. The target line is left out on 30 days, because the thermostat's history is heavy.
+- **Daily bars:** pump runtime per day, for 7 or 30 days, with the average of the finished days.
+- **Rooms:** now, lowest and highest in the period, and a small trend per room. The leading room is marked.
+- **Warm-up:** average heating rate, the last warm-up (from → to, minutes) and an estimate to the target. The estimate only shows while the pump runs and the room is warming.
+- **Events:** the last five mode changes and warnings.
+- Fills the height of a panel view, and has no editing controls.
+
+### Optional helpers
+
+The card works without these. When they exist and have a number as state, the card uses them for the headline pump runtime and number of starts, which is cheaper and survives a short recorder history. Otherwise it works the numbers out from history. For 7 and 30 days the change against the previous period always comes from history, because these sensors only cover the current window.
+
+| Entity | Type | Window | Used for |
+|---|---|---|---|
+| `sensor.heating_pump_runtime_today` | time (hours) | since midnight | Runtime, Today |
+| `sensor.heating_pump_runtime_yesterday` | time (hours) | all of yesterday | Runtime change for Today |
+| `sensor.heating_pump_runtime_week` | time (hours) | rolling 7 days | Runtime, 7 days |
+| `sensor.heating_pump_runtime_month` | time (hours) | rolling 30 days | Runtime, 30 days |
+| `sensor.heating_pump_starts_today` | count | since midnight | Starts, Today |
+| `sensor.heating_pump_starts_yesterday` | count | all of yesterday | Starts change for Today |
+| `sensor.heating_pump_starts_week` | count | rolling 7 days | Starts, 7 days |
+| `sensor.heating_pump_starts_month` | count | rolling 30 days | Starts, 30 days |
+
+With the yesterday sensors in place, Today is compared with all of yesterday, so the arrows lean downwards early in the day. Without them it is compared with yesterday up to the same time.
+
+A **start** is each time the pump switches on. An "on" that was already running when the period began doesn't count, with the sensors or without them.
+
+Create each one in Home Assistant under **Settings → Devices & services → Helpers → Create helper → Statistics (history stats)**:
+
+1. **Entity:** `binary_sensor.heating_pump`, **State:** `on`.
+2. **Type:** `time` for runtime, `count` for starts.
+3. **Start and end** of the window:
+
+| Window | Start | End |
+|---|---|---|
+| Today | `{{ now().replace(hour=0, minute=0, second=0) }}` | `{{ now() }}` |
+| Yesterday | `{{ now().replace(hour=0, minute=0, second=0) - timedelta(days=1) }}` | `{{ now().replace(hour=0, minute=0, second=0) }}` |
+| 7 days | `{{ now() - timedelta(days=7) }}` | `{{ now() }}` |
+| 30 days | `{{ now() - timedelta(days=30) }}` | `{{ now() }}` |
+
+4. Name each one so it gets the entity id above, for example "Heating pump runtime today".
+
+## Gauge card
+
+```yaml
+type: custom:yvz-gauge-card
+entity: sensor.cpu_usage
+warn_at: 70
+error_at: 90
+trend: true
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `entity` | | The entity to show. |
+| `name`, `icon`, `unit` | from the entity | Label, icon and unit. |
+| `variant` | `line` | `line`, `segments` or `stat` (number only). |
+| `min`, `max` | `0`, `100` | Range of the gauge. |
+| `warn_at`, `error_at` | | Colour turns amber and red from these values. |
+| `invert` | `false` | Low values are the bad ones, for example a battery. |
+| `target` | | A marker: a number, or another entity whose state is the target. |
+| `decimals` | automatic | Decimals shown. |
+| `trend`, `trend_hours` | `false`, `24` | A trend line under the gauge. |
+| `tap_action`, `hold_action` | more-info, none | `more-info`, `toggle`, `call-service`, `navigate`, `url` or `none`. |
 
 ## Tesla card
 

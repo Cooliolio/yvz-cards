@@ -23,6 +23,8 @@ export interface Scene {
   extra?: Record<string, unknown>[];
   controls: Control[];
   states(values: Record<string, ControlValue>): Record<string, HassEntity>;
+  // Fake history for a history/history_during_period call; return nothing to use the default.
+  history?(message: Record<string, unknown>): Record<string, Array<Record<string, unknown>>> | undefined;
   // For cards that look entities up in the registry instead of taking ids.
   registry?: { entities: Record<string, HassEntityRegistryEntry>; devices: Record<string, HassDevice> };
   // Lets service calls change the controls, standing in for HA automations.
@@ -356,6 +358,84 @@ const heating: Scene = {
   },
 };
 
+
+const MINUTE = 60_000;
+const DAY_MS = 86_400_000;
+
+// A believable week of heating: the pump cycles between 05:30 and 23:00, rooms follow the day.
+const fakePumpOn = (t: number): boolean => {
+  const d = new Date(t);
+  const h = d.getHours() + d.getMinutes() / 60;
+  if (h < 5.5 || h > 23) return false;
+  const day = Math.floor(t / DAY_MS);
+  const cycle = 70 + (day % 5) * 6;
+  return (t / MINUTE) % cycle < 22 + (day % 3) * 5;
+};
+const fakeSetpoint = (t: number): number => {
+  const d = new Date(t);
+  const h = d.getHours() + d.getMinutes() / 60;
+  return h >= 6.5 && h < 22.5 ? 20.5 : 17;
+};
+const fakeTemp = (t: number, offset: number): number =>
+  18.4 + 1.3 * Math.sin((t / DAY_MS) * 2 * Math.PI - 1.6) + 0.35 * Math.sin(t / (80 * MINUTE)) + offset;
+const roomOffset = (id: string): number => ([...id].reduce((a, c) => a + c.charCodeAt(0), 0) % 40) / 10 - 2;
+
+function fakeHistory(message: Record<string, unknown>): Record<string, Array<Record<string, unknown>>> {
+  const start = Date.parse(message.start_time as string);
+  const end = Date.parse(message.end_time as string);
+  const withAttributes = message.minimal_response === false;
+  const out: Record<string, Array<Record<string, unknown>>> = {};
+  for (const id of message.entity_ids as string[]) {
+    const items: Array<Record<string, unknown>> = [];
+    const push = (t: number, s: string, a?: Record<string, unknown>) => items.push({ lu: t / 1000, s, ...(a ? { a } : {}) });
+    if (id === "binary_sensor.heating_pump") {
+      let last: boolean | undefined;
+      for (let t = start; t <= end; t += MINUTE) {
+        const on = fakePumpOn(t);
+        if (on !== last) push(t, on ? "on" : "off");
+        last = on;
+      }
+    } else if (id === "climate.heating") {
+      for (let t = start; t <= end; t += 30 * MINUTE) {
+        push(t, "heat", withAttributes ? { temperature: fakeSetpoint(t), current_temperature: fakeTemp(t, 0) } : undefined);
+      }
+    } else if (id === "input_select.heating_mode") {
+      push(start, "Eco");
+      for (let d = Math.floor(start / DAY_MS) * DAY_MS; d < end; d += DAY_MS) {
+        const local = new Date(d);
+        local.setHours(6, 30, 0, 0);
+        if (local.getTime() > start && local.getTime() < end) push(local.getTime(), "Comfort");
+        local.setHours(22, 30, 0, 0);
+        if (local.getTime() > start && local.getTime() < end) push(local.getTime(), "Eco");
+      }
+      const boost = end - 30 * 3_600_000;
+      if (boost > start) push(boost, "Boost");
+      items.sort((a, b) => Number(a.lu) - Number(b.lu));
+    } else if (id.startsWith("binary_sensor.heating_")) {
+      push(start, "off");
+      const at = end - 3 * DAY_MS;
+      if (id.endsWith("battery_low") && at > start) push(at, "on");
+    } else if (id === "sensor.heating_trend") {
+      for (let t = start; t <= end; t += 10 * MINUTE) push(t, fakePumpOn(t) ? "0.6" : "-0.15");
+    } else {
+      const offset = id === "sensor.heating_control_temperature" ? 0 : roomOffset(id);
+      for (let t = start; t <= end; t += 10 * MINUTE) push(t, fakeTemp(t, offset).toFixed(1));
+    }
+    out[id] = items;
+  }
+  return out;
+}
+
+const heatingStats: Scene = {
+  ...heating,
+  name: "Heating stats",
+  tag: "yvz-heating-stats-card",
+  width: 560,
+  config: { type: "custom:yvz-heating-stats-card" },
+  extra: [{ type: "custom:yvz-heating-stats-card", compact: true }],
+  history: fakeHistory,
+};
+
 const TESLA_DEVICE = "tesla-device";
 const TESLA_PREFIX = "oprit_tesla_model_3_";
 
@@ -547,4 +627,41 @@ const tesla: Scene = {
   },
 };
 
-export const scenes: Scene[] = [host, heating, tesla, stove, gauges];
+const gaugeCard: Scene = {
+  name: "Gauge card",
+  tag: "yvz-gauge-card",
+  width: 360,
+  config: {
+    type: "custom:yvz-gauge-card",
+    entity: "sensor.workshop_cpu",
+    name: "CPU",
+    warn_at: 70,
+    error_at: 90,
+    trend: true,
+  },
+  extra: [
+    { type: "custom:yvz-gauge-card", entity: "sensor.workshop_battery", name: "Battery", variant: "segments", warn_at: 40, error_at: 15, invert: true },
+    { type: "custom:yvz-gauge-card", entity: "sensor.workshop_temp", variant: "stat", icon: "mdi:thermometer", warn_at: 60, error_at: 75, trend: true },
+    { type: "custom:yvz-gauge-card", entity: "sensor.workshop_room", name: "Room", min: 10, max: 30, target: "sensor.workshop_target", tap_action: { action: "call-service", perform_action: "script.demo" } },
+  ],
+  controls: [
+    gaugeControl("cpu", "CPU (%)", 42),
+    gaugeControl("battery", "Battery (%)", 30),
+    gaugeControl("temp", "Temperature (°C)", 48, 20, 100),
+    gaugeControl("room", "Room (°C)", 19.4, 10, 30, 0.1),
+    gaugeControl("target", "Target (°C)", 21, 10, 30, 0.5),
+  ],
+  states(v) {
+    const n = (k: string) => Number(v[k]);
+    const list = [
+      sensor("sensor.workshop_cpu", n("cpu"), "%", { friendly_name: "Workshop CPU" }),
+      sensor("sensor.workshop_battery", n("battery"), "%", { friendly_name: "Workshop battery" }),
+      sensor("sensor.workshop_temp", n("temp"), "°C", { friendly_name: "Workshop temperature" }),
+      sensor("sensor.workshop_room", n("room"), "°C", { friendly_name: "Room" }),
+      sensor("sensor.workshop_target", n("target"), "°C"),
+    ];
+    return Object.fromEntries(list.map((e) => [e.entity_id, e]));
+  },
+};
+
+export const scenes: Scene[] = [host, heating, heatingStats, tesla, gaugeCard, stove, gauges];

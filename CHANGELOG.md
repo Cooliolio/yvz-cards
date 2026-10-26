@@ -2,6 +2,21 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.7.0 — 2026-10-26
+
+### Added
+
+- **Heating stats card** (`custom:yvz-heating-stats-card`): how much the heating runs and how well it works, from the recorder's history, with no extra helpers.
+  - Period switch for today, 7 days and 30 days, remembered per card. Four key figures (pump runtime, starts, average temperature, longest run) with the change against the previous period.
+  - Run timeline with the pump on and off, the target and the room temperature. Daily runtime bars. A rooms table with lowest, highest and a trend per room, with the leading room marked.
+  - Warm-up: average heating rate, the last warm-up and an estimate to the target. The last five mode changes and warnings.
+  - Uses optional long-term sensors (`sensor.heating_pump_runtime_today` and friends, listed in the README) when they have a number as state, and falls back to the history otherwise. A start is each switch-on of the pump; an "on" already running when the period began isn't counted. With the yesterday sensors, Today is compared with all of yesterday. `compact` option, fills a panel view, visual editor, English, Dutch and Turkish.
+- **Gauge card** (`custom:yvz-gauge-card`): any entity as a line, segmented or stat gauge, with warn and error thresholds, a target marker, an optional trend and tap and hold actions. Visual editor.
+- A shared block layer (`src/blocks`) for building cards out of the same pieces: entity helpers, tap and hold actions and the gauge block.
+- Design components: `yvz-stat` (a key figure with a change arrow), `yvz-bars` and `yvz-timeline`.
+- `values`, `from` and `to` on `yvz-sparkline`, to draw data that is already loaded instead of fetching it.
+- Playground: scenes for the heating stats and gauge cards, with a fake history for the stats.
+
 ## 0.6.3 — 2026-10-26
 
 ### Changed
