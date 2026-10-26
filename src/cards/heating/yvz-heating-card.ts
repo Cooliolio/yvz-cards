@@ -476,7 +476,7 @@ export class YvzHeatingCard extends YvzCard<HeatingCardConfig> {
         margin-top: var(--yvz-space-3);
       }
 
-      /* extra height goes to the dial: it sits centred between the header and the buttons */
+      /* extra height goes around the controls: dial, switch and presets stay together, centred */
       .view {
         display: flex;
         flex: 1;
@@ -491,10 +491,6 @@ export class YvzHeatingCard extends YvzCard<HeatingCardConfig> {
         margin-top: var(--yvz-space-3);
       }
 
-      yvz-dial {
-        margin-block: auto;
-      }
-
       .rooms {
         align-self: start;
       }
@@ -505,10 +501,32 @@ export class YvzHeatingCard extends YvzCard<HeatingCardConfig> {
           grid-template-rows: auto;
           gap: var(--yvz-space-6);
         }
+
+        .rooms {
+          align-self: center;
+        }
+      }
+
+      /* big screens: a larger dial and roomier tiles */
+      @container (min-width: 900px) {
+        .main {
+          grid-template-columns: minmax(340px, 460px) 1fr;
+          gap: var(--yvz-space-6) 48px;
+        }
+
+        ha-card:not(.compact) yvz-dial {
+          max-width: 400px;
+        }
+
+        ha-card:not(.compact) .tiles {
+          --yvz-tile-height: 96px;
+          grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+        }
       }
 
       .control {
         display: flex;
+        justify-content: center;
         flex-direction: column;
         gap: var(--yvz-space-3);
       }
@@ -612,7 +630,7 @@ export class YvzHeatingCard extends YvzCard<HeatingCardConfig> {
 
       .tiles {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
         gap: var(--yvz-space-2);
       }
 

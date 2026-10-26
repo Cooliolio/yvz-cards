@@ -167,4 +167,17 @@ function update(): void {
 }
 
 resetScene(scene);
+// Handy for opening a specific state: ?scene=Heating&width=1100&height=900&theme=dark&lang=nl
+const query = new URLSearchParams(location.search);
+const named = scenes.find((s) => s.name.toLowerCase() === query.get("scene")?.toLowerCase());
+if (named) resetScene(named);
+// State overrides: ?s.shift=d&s.speed=108
+for (const [key, raw] of query) {
+  if (!key.startsWith("s.")) continue;
+  values[key.slice(2)] = raw === "true" ? true : raw === "false" ? false : raw !== "" && !Number.isNaN(Number(raw)) ? Number(raw) : raw;
+}
+width = Number(query.get("width")) || width;
+height = Number(query.get("height")) || height;
+theme = query.get("theme") ?? theme;
+language = query.get("lang") ?? language;
 update();

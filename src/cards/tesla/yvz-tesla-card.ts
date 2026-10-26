@@ -926,8 +926,29 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
         flex: 1;
       }
 
-      .col:first-child .hero {
-        flex: 1;
+      /* car, battery and chips stay together, centred in the extra height */
+      .col:first-child {
+        justify-content: center;
+      }
+
+      /* driving: one centred block (car and speed side by side, battery below), not stretched */
+      .grid.driving {
+        align-items: center;
+        justify-content: center;
+      }
+
+      .grid.driving .col {
+        justify-content: center;
+        width: 100%;
+        max-width: 760px;
+      }
+
+      .grid.driving .col:first-child {
+        flex: 0 1 auto;
+      }
+
+      .grid.driving .hero {
+        flex: 0 0 auto;
       }
 
       .col {
@@ -1118,6 +1139,13 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
         }
       }
 
+      /* four tiles across need about 430px; below that two across keeps the labels readable */
+      @container (max-width: 429px) {
+        .tiles {
+          --_cols: 2;
+        }
+      }
+
       @container (min-width: 480px) {
         ha-card:not(.compact) .car {
           --tesla-car-height: 130px;
@@ -1140,20 +1168,24 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
         }
 
         .grid:not(.driving) .col:last-child {
-          align-self: start;
+          align-self: center;
         }
 
-        ha-card:not(.compact) .hero {
+        ha-card:not(.compact) .grid:not(.driving) .hero {
           flex-direction: column;
           align-items: stretch;
           gap: var(--yvz-space-2);
+        }
+
+        ha-card:not(.compact) .grid:not(.driving) .car-wrap {
+          flex: none;
         }
 
         ha-card:not(.compact) .car {
           --tesla-car-height: 190px;
         }
 
-        ha-card:not(.compact) .stats {
+        ha-card:not(.compact) .grid:not(.driving) .stats {
           display: flex;
           align-items: baseline;
           gap: var(--yvz-space-4);
@@ -1164,7 +1196,11 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
           font-size: 56px;
         }
 
-        ha-card:not(.compact) .range {
+        ha-card:not(.compact) .grid.driving .pct {
+          font-size: 72px;
+        }
+
+        ha-card:not(.compact) .grid:not(.driving) .range {
           margin: 0;
           font-size: var(--yvz-text-value);
         }

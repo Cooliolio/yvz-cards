@@ -364,9 +364,10 @@ export const carStyles = css`
     fill: #111214;
   }
 
+  /* each wheel group is translated to its centre, so spinning around the local origin is spinning around the hub */
   .car .spinner {
-    transform-box: fill-box;
-    transform-origin: center;
+    transform-box: view-box;
+    transform-origin: 0 0;
   }
 
   .car.driving .spinner {

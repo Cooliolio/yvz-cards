@@ -2,6 +2,22 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.6.2 — 2026-10-26
+
+### Changed
+
+- Heating in a panel view: the dial, On/Off switch and presets stay together, centred, and the rooms are centred next to them. On wide cards (900px and up) the dial and room tiles get bigger.
+- Tesla in a panel view: the car, battery and chips are one centred block, and so is the controls column. While driving, the car and speed sit side by side in one centred block instead of being stretched apart.
+- Tesla controls go two across on narrow cards (under 430px), so tile labels are no longer cut off on a phone.
+
+### Fixed
+
+- Tesla: the wheels now spin around their centre while driving instead of wobbling.
+
+### Added
+
+- Playground: open a specific state from the URL, for example `?scene=Tesla&width=1100&height=800&s.shift=d&s.speed=108`.
+
 ## 0.6.1 — 2026-10-26
 
 ### Changed
