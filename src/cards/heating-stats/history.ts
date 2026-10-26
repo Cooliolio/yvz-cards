@@ -12,6 +12,9 @@ const LONG_RUN_MS = 30 * 60_000;
 // A reading this far from both neighbours, within minutes, is a glitch rather than weather.
 const SPIKE_STEP = 3;
 const SPIKE_WINDOW_MS = 15 * 60_000;
+// A short excursion (a dip and rebound) lasts at most this long, and ends back near where it started.
+const EXCURSION_MS = 5 * 60_000;
+const EXCURSION_RETURN = SPIKE_STEP / 2;
 
 export interface Sample {
   t: number;
@@ -105,16 +108,40 @@ export function thin(points: Point[], max = MAX_LINE_POINTS): Point[] {
   return out;
 }
 
-// Drops single readings that jump away from both neighbours, so they can't stretch a chart or skew a mean.
+// Drops glitches so they can't stretch a chart or skew a mean: a single reading that jumps away from both
+// neighbours, and a short run of readings (up to 5 minutes) that strays more than 3° from the level before
+// and after it while those two are close to each other.
 export function despike<T extends { t: number }>(items: T[], value: (item: T) => number): T[] {
-  return items.filter((item, i) => {
+  const drop = new Set<number>();
+  const near = (a: T, b: T) => b.t - a.t <= SPIKE_WINDOW_MS;
+
+  items.forEach((item, i) => {
     const prev = items[i - 1];
     const next = items[i + 1];
-    if (!prev || !next) return true;
-    if (item.t - prev.t > SPIKE_WINDOW_MS || next.t - item.t > SPIKE_WINDOW_MS) return true;
+    if (!prev || !next || !near(prev, item) || !near(item, next)) return;
     const v = value(item);
-    return !(Math.abs(v - value(prev)) > SPIKE_STEP && Math.abs(v - value(next)) > SPIKE_STEP);
+    if (Math.abs(v - value(prev)) > SPIKE_STEP && Math.abs(v - value(next)) > SPIKE_STEP) drop.add(i);
   });
+
+  for (let i = 1; i < items.length - 1; i++) {
+    let found = -1;
+    for (let j = i; j < items.length - 1 && items[j].t - items[i].t <= EXCURSION_MS; j++) {
+      const before = items[i - 1];
+      const after = items[j + 1];
+      if (!near(before, items[i]) || !near(items[j], after)) continue;
+      const vb = value(before);
+      const va = value(after);
+      if (Math.abs(va - vb) > EXCURSION_RETURN) continue;
+      const base = (vb + va) / 2;
+      const run = items.slice(i, j + 1).map((x) => Math.abs(value(x) - base));
+      if (run.every((d) => d > EXCURSION_RETURN) && run.some((d) => d > SPIKE_STEP)) found = j;
+    }
+    if (found >= 0) {
+      for (let k = i; k <= found; k++) drop.add(k);
+      i = found;
+    }
+  }
+  return items.filter((_, i) => !drop.has(i));
 }
 
 export const cleanPoints = (points: Point[]): Point[] => despike(points, (p) => p.v);

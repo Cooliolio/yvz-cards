@@ -2,6 +2,16 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.7.2 — 2026-10-26
+
+### Changed
+
+- Heating stats: the pump runs, the daily bars and the legend are blue (the theme's accent colour) instead of orange. Green stays for the "on" state, and orange for the Tesla climate only.
+- Heating stats: short glitches in the room sensors are ignored, not only single readings. A dip and rebound of up to 5 minutes that strays more than 3° and ends back near where it started is dropped from the chart, the averages and each room's lowest and highest.
+- Heating stats: the daily bars scale from 1 hour, down from 2.
+- Heating stats: the coldest room no longer has a tinted row. It keeps its snowflake, and its gap shows in the accent colour. The leading room is the only marked row.
+- Playground: a heating stats scene with a dip and rebound.
+
 ## 0.7.1 — 2026-10-26
 
 ### Added

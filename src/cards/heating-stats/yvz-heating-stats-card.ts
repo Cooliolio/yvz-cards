@@ -33,7 +33,7 @@ const EVENTS_WIDE = 8;
 const MIN_DAYS_FOR_AVERAGE = 3;
 const ARM_MS = 3000;
 // The daily bars never scale below this, so one active day doesn't fill the chart.
-const MIN_BAR_SCALE_H = 2;
+const MIN_BAR_SCALE_H = 1;
 const MODE_KEYS: Record<string, TranslationKey> = {
   Off: "heating.off",
   On: "heating.on",
@@ -639,7 +639,7 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
       }
 
       .swatch.run {
-        background: var(--yvz-heat);
+        background: var(--yvz-accent);
       }
 
       .swatch.line {
@@ -650,10 +650,6 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
         height: 0;
         border-top: 2px dashed var(--yvz-text-muted);
         border-radius: 0;
-      }
-
-      yvz-bars.days {
-        --yvz-state: var(--yvz-heat);
       }
 
       .rooms {
@@ -677,10 +673,6 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
 
       .room:hover {
         background: color-mix(in srgb, var(--yvz-text) 5%, transparent);
-      }
-
-      .room.coldest {
-        background: var(--yvz-standby-soft);
       }
 
       .room.armed {
@@ -728,6 +720,10 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
 
       .room .gap.below {
         color: var(--yvz-text);
+      }
+
+      .room.coldest .gap {
+        color: var(--yvz-accent);
       }
 
       .room .now {

@@ -375,6 +375,8 @@ interface FakeCase {
   frost: boolean;
   // One glitchy reading yesterday afternoon.
   spike: boolean;
+  // A dip and rebound over four readings within four minutes, yesterday afternoon.
+  dip: boolean;
   // The pump only ran on one day (two days ago).
   oneDay: boolean;
   // Days of history that exist; earlier ones return nothing, like a new install.
@@ -407,7 +409,7 @@ function fakeHistory(
   message: Record<string, unknown>,
   v: Record<string, ControlValue>,
 ): Record<string, Array<Record<string, unknown>>> {
-  const c: FakeCase = { frost: !!v.frost, spike: !!v.spike, oneDay: !!v.oneDay, dataDays: Number(v.dataDays ?? 60) };
+  const c: FakeCase = { frost: !!v.frost, spike: !!v.spike, dip: !!v.dip, oneDay: !!v.oneDay, dataDays: Number(v.dataDays ?? 60) };
   const end = Date.parse(message.end_time as string);
   const asked = Date.parse(message.start_time as string);
   // Nothing exists before the install, and the first sample is the first real reading.
@@ -451,6 +453,11 @@ function fakeHistory(
     } else {
       const offset = id === "sensor.heating_control_temperature" ? 0 : roomOffset(id);
       for (let t = start; t <= end; t += 10 * MINUTE) push(t, fakeTemp(t, offset, c).toFixed(1));
+      const dipAt = midnight(Date.now()) - 9 * 3_600_000;
+      if (c.dip && dipAt > start) {
+        [6, 9, 8, 5].forEach((drop, m) => push(dipAt + m * MINUTE, (fakeTemp(dipAt + m * MINUTE, offset, c) - drop).toFixed(1)));
+        items.sort((a, b) => Number(a.lu) - Number(b.lu));
+      }
     }
     out[id] = items;
   }
@@ -491,6 +498,7 @@ const heatingStats: Scene = {
     ...heating.controls,
     { key: "frost", label: "Frost target (5°)", type: "checkbox", value: false },
     { key: "spike", label: "One glitchy reading yesterday", type: "checkbox", value: false },
+    { key: "dip", label: "Dip and rebound within 4 minutes", type: "checkbox", value: false },
     { key: "oneDay", label: "Pump ran on one day only", type: "checkbox", value: false },
     gaugeControl("dataDays", "Days of history", 60, 1, 60),
     { key: "season", label: "Season sensors", type: "checkbox", value: true },
@@ -514,6 +522,7 @@ const statsCase = (name: string, patch: Record<string, ControlValue>, extra: Par
 const heatingStatsCases: Scene[] = [
   statsCase("wide panel", {}, { width: 1100, height: 780, extra: [] }),
   statsCase("frost target and spike", { frost: true, spike: true }),
+  statsCase("dip and rebound", { dip: true }),
   statsCase("one active day", { oneDay: true }),
   statsCase(
     "new install",

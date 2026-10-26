@@ -38,7 +38,7 @@ export class YvzTimeline extends LitElement {
       }
 
       .run {
-        fill: var(--yvz-heat);
+        fill: var(--yvz-accent);
         opacity: 0.9;
       }
 
