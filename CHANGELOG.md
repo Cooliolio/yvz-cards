@@ -2,6 +2,17 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.6.1 — 2026-10-26
+
+### Changed
+
+- Cards now fill the height of a panel view instead of stopping at their content. In sections and masonry views nothing changes: the height still follows the content.
+  - Heating: the dial stays centred between the header and the buttons.
+  - Tesla: the car area grows and keeps the car centred; controls keep their size.
+  - Stove: the power button and steppers are centred in the extra height.
+  - Host: the sections share the extra height.
+- Playground: a panel height slider to try the above.
+
 ## 0.6.0 — 2026-10-26
 
 ### Added

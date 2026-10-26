@@ -186,6 +186,10 @@ For the **Tesla Fleet** and **Teslemetry** integrations. Pick your car and every
 - While driving, the card shows speed and gear and hides climate and controls.
 - Tap the car while it is asleep, twice, to wake it. A banner warns when the car's data is more than three hours old.
 
+## Panel view
+
+Put a card alone in a `type: panel` view and it fills the whole height, with the extra space going to its main part (the dial, the car) rather than to blank space at the bottom. In sections and masonry views the card stays as tall as its content, as before.
+
 ## Colours
 
 The cards colour themselves by state. You can override any state colour in your theme or with card-mod:

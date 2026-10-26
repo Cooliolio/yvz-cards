@@ -161,6 +161,7 @@ export class YvzStoveCard extends YvzCard<StoveCardConfig> {
     css`
       .body {
         display: flex;
+        flex: 1;
         align-items: center;
         gap: var(--yvz-space-5);
         margin-top: var(--yvz-space-4);

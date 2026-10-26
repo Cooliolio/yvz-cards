@@ -16,6 +16,7 @@ let values: Record<string, ControlValue> = {};
 let language = "en";
 let theme = "dark";
 let width = 440;
+let height = 0;
 let failServices = false;
 let configText = "";
 let configError = false;
@@ -143,6 +144,10 @@ function update(): void {
           <input type="range" min="260" max="1400" step="10" .value=${live(String(width))}
             @input=${(e: Event) => { width = Number((e.target as HTMLInputElement).value); update(); }} />
         </label>
+        <label>Panel height: ${height ? `${height}px` : "auto"}
+          <input type="range" min="0" max="1400" step="10" .value=${live(String(height))}
+            @input=${(e: Event) => { height = Number((e.target as HTMLInputElement).value); update(); }} />
+        </label>
         <label class="check"><input type="checkbox" .checked=${failServices}
           @change=${(e: Event) => { failServices = (e.target as HTMLInputElement).checked; }} />Services fail</label>
         <h2>State</h2>
@@ -152,7 +157,7 @@ function update(): void {
           @input=${(e: Event) => { configText = (e.target as HTMLTextAreaElement).value; applyConfig(); update(); }}></textarea>
       </aside>
       <main>
-        <div class="stage" style="width: ${width}px"></div>
+        <div class="stage ${height ? "panel" : ""}" style="width: ${width}px; ${height ? `height: ${height}px` : ""}"></div>
         <ul class="log">${log.length ? log.map((l) => html`<li>${l}</li>`) : html`<li>service calls appear here</li>`}</ul>
       </main>
     `,

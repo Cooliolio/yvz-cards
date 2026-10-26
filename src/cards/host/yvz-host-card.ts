@@ -513,6 +513,8 @@ export class YvzHostCard extends YvzCard<HostCardConfig> {
       /* A band is one row of sections; sections that share it are split by a vertical rule. */
       .band {
         display: grid;
+        flex: 1 1 auto;
+        align-content: center;
         grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
         column-gap: 1px;
         border-top: 1px solid var(--yvz-divider);

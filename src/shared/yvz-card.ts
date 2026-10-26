@@ -25,11 +25,18 @@ export abstract class YvzCard<C extends LovelaceCardConfig = LovelaceCardConfig>
   static override styles: CSSResultGroup = [
     designStyles,
     css`
+      /* In a panel view the parent has a height and the card fills it; with an auto-height parent
+         (sections, masonry) a percentage height computes to auto, so the card stays as tall as its content. */
       :host {
         display: block;
+        height: 100%;
       }
 
       ha-card {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        box-sizing: border-box;
         padding: var(--yvz-space-4);
         color: var(--yvz-text);
         font-size: var(--yvz-text-body);

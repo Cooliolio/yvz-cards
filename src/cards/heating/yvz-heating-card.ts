@@ -476,17 +476,34 @@ export class YvzHeatingCard extends YvzCard<HeatingCardConfig> {
         margin-top: var(--yvz-space-3);
       }
 
+      /* extra height goes to the dial: it sits centred between the header and the buttons */
+      .view {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+      }
+
       .main {
         display: grid;
+        flex: 1;
+        grid-template-rows: minmax(auto, 1fr) auto;
         gap: var(--yvz-space-5);
         margin-top: var(--yvz-space-3);
+      }
+
+      yvz-dial {
+        margin-block: auto;
+      }
+
+      .rooms {
+        align-self: start;
       }
 
       @container (min-width: 640px) {
         .main {
           grid-template-columns: minmax(300px, 380px) 1fr;
+          grid-template-rows: auto;
           gap: var(--yvz-space-6);
-          align-items: start;
         }
       }
 

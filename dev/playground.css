@@ -124,3 +124,12 @@ main {
   font-size: 12px;
   list-style: none;
 }
+
+/* Like a panel view: one card that fills a parent with a fixed height. */
+.stage.panel {
+  display: block;
+}
+
+.stage.panel > :not(:first-child) {
+  display: none;
+}

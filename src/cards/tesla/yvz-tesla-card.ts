@@ -907,11 +907,27 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
         -webkit-tap-highlight-color: transparent;
       }
 
+      /* extra height goes to the car area, which keeps the car centred */
+      .view {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+      }
+
       .grid {
         display: flex;
+        flex: 1;
         flex-direction: column;
         gap: var(--yvz-space-4);
         margin-top: var(--yvz-space-3);
+      }
+
+      .col:first-child {
+        flex: 1;
+      }
+
+      .col:first-child .hero {
+        flex: 1;
       }
 
       .col {
@@ -1062,6 +1078,7 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
       /* compact: status only; car on the left, battery on the right, one column when narrow */
       .glance {
         display: grid;
+        flex: 1;
         grid-template-columns: minmax(0, 38%) minmax(0, 1fr);
         gap: var(--yvz-space-4);
         align-items: center;
@@ -1120,7 +1137,10 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
           display: grid;
           grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
           gap: var(--yvz-space-6);
-          align-items: start;
+        }
+
+        .grid:not(.driving) .col:last-child {
+          align-self: start;
         }
 
         ha-card:not(.compact) .hero {
