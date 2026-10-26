@@ -53,10 +53,36 @@ actions:
 |---|---|
 | `name` | Card title. Default: "Stove". |
 | `status` | `input_select`, `select` or `sensor` with the stove's state. |
-| `state_map` | What each status value means: `off`, `pending`, `on`, `standby` or `error`. Sets the colour and the confirm question. Unmapped states use the accent colour. |
-| `temperature` | Temperature sensor, shown in the header. |
-| `power_sensor` | Power usage sensor, shown next to the status while the stove runs. |
-| `actions` | What each button triggers: a script, scene, button, input_button, switch or input_boolean. `power` asks for a second tap to confirm. A stepper only shows when both its up and down actions are set. |
+| `state_map` | What each status value means: `off`, `pending` (igniting), `on` (burning), `standby` (cooling down) or `error`. Sets the colour of the power button and the status dot. Unmapped states use the accent colour. |
+| `temperature` | Room temperature sensor, shown large in the header. |
+| `power_sensor` | Power usage sensor in watts. Only used to spot a status that doesn't match the draw, see below. |
+| `actions` | What each button triggers: a script, scene, button, input_button, switch or input_boolean. A row of − and + only shows when both its actions are set. |
+| `compact` | One row: power, name, status, temperature and the temperature buttons. |
+
+The stove is a remote: the commands go out over infrared and nothing comes back, so the card never shows a target temperature or fan level. After a tap the button flashes and the status line says what was sent ("Warmer sent") for 3 seconds. A second press of the same button within a second is ignored, so a double tap can't send two steps.
+
+**Power:** one tap switches the stove on. While it is burning or igniting the first tap arms the button (red ring, "Tap again to turn off", gone after 3 seconds) and the second tap sends the command.
+
+**The line under the controls** shows one thing, and nothing when there is nothing reliable to show. It works out ignition from the status history of the last 48 hours: the time between the start of Ontsteken (`pending`) and the start of the next Brandt (`on`).
+
+| Status | Line |
+|---|---|
+| Off | "Last on: 18:42 to 21:35 · ignited in 9 min" |
+| Igniting | "Usually takes 10 min", with a bar that fills towards the average |
+| Burning | "Ignited in 9 min · avg 10 min", amber when the ignition took more than 1.5 times the average |
+| Failed ignition (error right after igniting) | "No fire after 15 min · 1 failed today" |
+
+The ignition parts are hidden when there was no igniting before the burning, when the run began before the available history, or when the history can't be loaded. If `power_sensor` shows real draw (more than `power_threshold`, default 150 W) while the status is off, or almost none while it burns, for more than 5 minutes, the line says "Status may be wrong: the plug draws 410 W" instead.
+
+Optional extras, each hidden when not set:
+
+| Option | Description |
+|---|---|
+| `ignition_avg` | Average ignition time today, in minutes. Without it the igniting bar assumes 10 minutes and a slow ignition isn't flagged. |
+| `failures_today` | Failed ignitions today. |
+| `trend`, `trend_off` | °C per hour while it burns, and while it is off or cooling down (shown as a drop). Shown under the room temperature. |
+| `pellets_hours` | Hours of pellets left. A "Refill in 3 h" chip shows when it is at or below `pellets_threshold` (default 4). |
+| `power_threshold` | Watts above which an off stove looks suspicious. Default 150. |
 
 ## Host card
 

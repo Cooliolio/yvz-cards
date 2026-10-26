@@ -2,6 +2,26 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.8.0 — 2026-10-26
+
+### Changed
+
+- **Stove card redesign**, same configuration and commands as before.
+  - Floating controls: a squircle power button in the state colour, round − and + buttons for temperature and fan without a container, the name and status on the left and the room temperature large on the right.
+  - Colours follow the status: grey off, amber igniting, green burning, blue cooling down, red error.
+  - The status line shows how long the stove has been in its state ("Burning · 2 h 14 min"). Tapping a command shows "Warmer sent" there for 3 seconds and flashes the button, and a second press within a second is ignored.
+  - A burning or igniting stove needs a second tap to switch off: the power button gets a red ring and the status line says "Tap again to turn off".
+  - `compact: true` is one row with the temperature buttons.
+  - Fills the height of a panel view.
+- The round power button of the design system is now a squircle that only draws; whoever uses it decides when a second tap is needed.
+
+### Added
+
+- Stove card: one line under the controls, from the status history. Ignition time ("Ignited in 9 min · avg 10 min", amber when slow), the igniting progress, the last run when it is off, a failed ignition ("No fire after 15 min · 1 failed today") and a hint when the status and the wattage disagree for 5 minutes. Hidden when there is nothing reliable to show.
+- Stove card options: `ignition_avg`, `failures_today`, `trend`, `trend_off`, `pellets_hours`, `pellets_threshold`, `power_threshold` and `compact`, all optional. A refill chip shows when the pellets are low.
+- Design components: `yvz-note` (a quiet one-line remark with an optional progress bar), and a `status` flash on `yvz-icon-button`.
+- Playground: a stove scene for each state (off after a run, igniting, slow ignition, cooling down, failed ignition, low pellets, wrong state, history starting mid-run) with a fake status history. The compact card is underneath.
+
 ## 0.7.2 — 2026-10-26
 
 ### Changed

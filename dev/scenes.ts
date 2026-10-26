@@ -53,15 +53,70 @@ const entity = (
 
 const STOVE_OPTIONS = ["Uit", "Ontsteken", "Brandt", "Uitdoven", "Storing"];
 
+// The status history the card reads, built backwards from the status the controls ask for.
+function stoveHistory(
+  message: Record<string, unknown>,
+  v: Record<string, ControlValue>,
+): Record<string, Array<Record<string, unknown>>> {
+  if (v.historyFails) throw new Error("history unavailable");
+  const end = Date.parse(message.end_time as string);
+  const start = Date.parse(message.start_time as string);
+  const out: Record<string, Array<Record<string, unknown>>> = {};
+  for (const id of message.entity_ids as string[]) {
+    if (id === "sensor.stove_power") {
+      out[id] = [{ lu: start / 1000, s: String(v.power) }];
+      continue;
+    }
+    const min = (n: number) => n * 60_000;
+    const now = end;
+    const current = now - min(Number(v.minutes));
+    const ignition = min(Number(v.ignitionMin));
+    const status = String(v.status);
+    let segments: Array<[number, string]>;
+    if (status === "Brandt") {
+      segments = [[current - ignition - min(180), "Uit"], [current - ignition, "Ontsteken"], [current, "Brandt"]];
+    } else if (status === "Ontsteken") {
+      segments = [[current - min(180), "Uit"], [current, "Ontsteken"]];
+    } else if (status === "Uitdoven") {
+      const burn = current - min(150);
+      segments = [[burn - ignition - min(180), "Uit"], [burn - ignition, "Ontsteken"], [burn, "Brandt"], [current, "Uitdoven"]];
+    } else if (status === "Storing") {
+      segments = [[current - ignition - min(120), "Uit"], [current - ignition, "Ontsteken"], [current, "Storing"]];
+    } else {
+      const cooling = current - min(20);
+      const burn = cooling - min(150);
+      segments = [
+        [burn - ignition - min(180), "Uit"],
+        [burn - ignition, "Ontsteken"],
+        [burn, "Brandt"],
+        [cooling, "Uitdoven"],
+        [current, "Uit"],
+      ];
+    }
+    // History that starts in the middle of the current state, so nothing before it is known.
+    if (v.noRunHistory) segments = [[current, status]];
+    const before = segments.filter(([t]) => t <= start).pop();
+    const inside = segments.filter(([t]) => t > start);
+    out[id] = [...(before ? [[start, before[1]] as [number, string]] : []), ...inside].map(([t, state]) => ({ lu: t / 1000, s: state }));
+  }
+  return out;
+}
+
 const stove: Scene = {
   name: "Stove",
   tag: "yvz-stove-card",
+  width: 440,
   config: {
     type: "custom:yvz-stove-card",
     name: "Soba",
     status: "input_select.stove_status",
     temperature: "sensor.stove_temperature",
     power_sensor: "sensor.stove_power",
+    ignition_avg: "sensor.stove_avg_ignition",
+    failures_today: "sensor.stove_failed_today",
+    trend: "input_number.stove_heating_rate",
+    trend_off: "input_number.stove_cooling_rate",
+    pellets_hours: "sensor.stove_refill_in",
     state_map: { Uit: "off", Ontsteken: "pending", Brandt: "on", Uitdoven: "standby", Storing: "error" },
     actions: {
       power: "script.stove_power",
@@ -71,26 +126,72 @@ const stove: Scene = {
       fan_down: "script.stove_fan_down",
     },
   },
+  extra: [
+    {
+      type: "custom:yvz-stove-card",
+      compact: true,
+      name: "Soba",
+      status: "input_select.stove_status",
+      temperature: "sensor.stove_temperature",
+      state_map: { Uit: "off", Ontsteken: "pending", Brandt: "on", Uitdoven: "standby", Storing: "error" },
+      actions: {
+        power: "script.stove_power",
+        temp_up: "script.stove_temp_up",
+        temp_down: "script.stove_temp_down",
+      },
+    },
+  ],
+  history: stoveHistory,
   controls: [
     { key: "status", label: "Status", type: "select", value: "Brandt", options: [...STOVE_OPTIONS, "unavailable"] },
-    { key: "minutes", label: "Minutes in state", type: "range", value: 9, min: 0, max: 300, step: 1 },
-    { key: "temperature", label: "Temperature", type: "range", value: 18.2, min: 5, max: 30, step: 0.1 },
+    { key: "minutes", label: "Minutes in state", type: "range", value: 134, min: 0, max: 300, step: 1 },
+    { key: "ignitionMin", label: "Last ignition took (min)", type: "range", value: 9, min: 1, max: 30, step: 1 },
+    { key: "avgIgnition", label: "Average ignition (min, 0 = none)", type: "range", value: 10, min: 0, max: 20, step: 1 },
+    { key: "failures", label: "Failed ignitions today", type: "range", value: 1, min: 0, max: 5, step: 1 },
+    { key: "temperature", label: "Temperature", type: "range", value: 22.4, min: 5, max: 30, step: 0.1 },
+    { key: "heatRate", label: "Heating rate (°C/h)", type: "range", value: 1.2, min: 0, max: 3, step: 0.1 },
+    { key: "coolRate", label: "Cooling rate (°C/h)", type: "range", value: 0.4, min: 0, max: 2, step: 0.1 },
+    { key: "pellets", label: "Pellet hours left (-1 = no sensor)", type: "range", value: 12, min: -1, max: 24, step: 1 },
     { key: "power", label: "Power (W)", type: "range", value: 39, min: 0, max: 1000, step: 1 },
+    { key: "noRunHistory", label: "History starts mid-run", type: "checkbox", value: false },
+    { key: "historyFails", label: "History unavailable", type: "checkbox", value: false },
   ],
   states(v) {
     const scripts = ["power", "temp_up", "temp_down", "fan_up", "fan_down"].map((a) =>
       entity(`script.stove_${a}`, "off"),
     );
-    return Object.fromEntries(
-      [
-        entity("input_select.stove_status", String(v.status), { options: STOVE_OPTIONS }, Number(v.minutes)),
-        entity("sensor.stove_temperature", String(v.temperature), { device_class: "temperature" }),
-        entity("sensor.stove_power", String(v.power), { device_class: "power" }),
-        ...scripts,
-      ].map((e) => [e.entity_id, e]),
-    );
+    const list = [
+      entity("input_select.stove_status", String(v.status), { options: STOVE_OPTIONS }, Number(v.minutes)),
+      entity("sensor.stove_temperature", String(v.temperature), { device_class: "temperature" }),
+      entity("sensor.stove_power", String(v.power), { device_class: "power", unit_of_measurement: "W" }),
+      ...(Number(v.avgIgnition) > 0 ? [entity("sensor.stove_avg_ignition", String(v.avgIgnition), { unit_of_measurement: "min" })] : []),
+      entity("sensor.stove_failed_today", String(v.failures)),
+      entity("input_number.stove_heating_rate", String(v.heatRate), { unit_of_measurement: "°C/h" }),
+      entity("input_number.stove_cooling_rate", String(v.coolRate), { unit_of_measurement: "°C/h" }),
+      ...(Number(v.pellets) >= 0 ? [entity("sensor.stove_refill_in", String(v.pellets), { unit_of_measurement: "h" })] : []),
+      ...scripts,
+    ];
+    return Object.fromEntries(list.map((e) => [e.entity_id, e]));
   },
 };
+
+// The same scene with one case switched on, so each state of the design can be opened directly.
+const stoveCase = (name: string, patch: Record<string, ControlValue>): Scene => ({
+  ...stove,
+  name: `Stove · ${name}`,
+  controls: stove.controls.map((c) => (c.key in patch ? { ...c, value: patch[c.key] } : c)),
+});
+
+const stoveCases: Scene[] = [
+  stoveCase("off, last run", { status: "Uit", minutes: 25, power: 0 }),
+  stoveCase("igniting", { status: "Ontsteken", minutes: 6, power: 310 }),
+  stoveCase("burning, slow ignition", { status: "Brandt", minutes: 38, ignitionMin: 17 }),
+  stoveCase("cooling down", { status: "Uitdoven", minutes: 12, power: 18 }),
+  stoveCase("failed ignition", { status: "Storing", minutes: 4, ignitionMin: 15, power: 0 }),
+  stoveCase("low pellets", { pellets: 3 }),
+  stoveCase("wrong state", { status: "Uit", minutes: 12, power: 410 }),
+  stoveCase("history starts mid-run", { noRunHistory: true }),
+];
 
 const gaugeControl = (key: string, label: string, value: number, min = 0, max = 100, step = 1): Control => ({
   key,
@@ -759,4 +860,4 @@ const gaugeCard: Scene = {
   },
 };
 
-export const scenes: Scene[] = [host, heating, heatingStats, ...heatingStatsCases, tesla, gaugeCard, stove, gauges];
+export const scenes: Scene[] = [host, heating, heatingStats, ...heatingStatsCases, tesla, gaugeCard, stove, ...stoveCases, gauges];

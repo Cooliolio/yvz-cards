@@ -15,11 +15,27 @@ export class YvzStoveCardEditor extends YvzCardEditor<StoveCardConfig> {
       { name: "status", selector: { entity: { domain: ["input_select", "select", "sensor"] } } },
       { name: "temperature", selector: { entity: { domain: "sensor", device_class: "temperature" } } },
       { name: "power_sensor", selector: { entity: { domain: "sensor", device_class: "power" } } },
+      { name: "compact", selector: { boolean: {} } },
       {
         type: "expandable",
         name: "actions",
         title: this.t("stove.actions"),
         schema: STOVE_ACTIONS.map((name) => ({ name, selector: { entity: { domain: PRESSABLE } } })),
+      },
+      {
+        type: "expandable",
+        name: "extra",
+        flatten: true,
+        title: this.t("stove.extra"),
+        schema: [
+          { name: "ignition_avg", selector: { entity: { domain: ["sensor", "input_number"] } } },
+          { name: "failures_today", selector: { entity: { domain: ["sensor", "input_number"] } } },
+          { name: "trend", selector: { entity: { domain: ["sensor", "input_number"] } } },
+          { name: "trend_off", selector: { entity: { domain: ["sensor", "input_number"] } } },
+          { name: "pellets_hours", selector: { entity: { domain: ["sensor", "input_number"] } } },
+          { name: "pellets_threshold", selector: { number: { mode: "box", min: 0, max: 48 } } },
+          { name: "power_threshold", selector: { number: { mode: "box", min: 0, max: 5000 } } },
+        ],
       },
     ];
   }

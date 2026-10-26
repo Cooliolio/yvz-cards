@@ -3,6 +3,7 @@ import { customElement, property } from "lit/decorators.js";
 import { HoldRepeat } from "../hold-repeat";
 import { designStyles } from "../styles";
 import { reducedMotion } from "../tween";
+import type { ButtonStatus } from "./yvz-button";
 
 // Round button. Plain: borderless, for secondary actions such as settings or close.
 // Raised: filled and a bit larger, for primary controls such as −/+ on a dial.
@@ -14,6 +15,8 @@ export class YvzIconButton extends LitElement {
   @property({ type: Boolean, reflect: true }) raised = false;
   // While held, fires yvz-repeat (see HoldRepeat).
   @property({ type: Boolean }) repeat = false;
+  // Flashes green or red after a command was sent, like yvz-button.
+  @property({ reflect: true }) status: ButtonStatus = "idle";
 
   private hold = new HoldRepeat(this, () => this.repeat && !this.disabled);
 
@@ -62,6 +65,16 @@ export class YvzIconButton extends LitElement {
       :host([raised]) button:active {
         background: var(--yvz-state-soft, var(--yvz-accent-soft));
         transform: scale(var(--yvz-press-scale));
+      }
+
+      :host([status="success"]) button {
+        background: var(--yvz-on-soft);
+        color: var(--yvz-on);
+      }
+
+      :host([status="error"]) button {
+        background: var(--yvz-error-soft);
+        color: var(--yvz-error);
       }
 
       button:disabled {

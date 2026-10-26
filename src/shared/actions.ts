@@ -5,17 +5,20 @@ interface HasStatus {
   status: ButtonStatus;
 }
 
-// Shows success/error on a control briefly after an async action settles.
-export async function runAction(el: HasStatus, action: () => Promise<unknown>, resetMs = 900): Promise<void> {
+// Shows success/error on a control briefly after an async action settles; says whether it worked.
+export async function runAction(el: HasStatus, action: () => Promise<unknown>, resetMs = 900): Promise<boolean> {
+  let ok = true;
   try {
     await action();
     el.status = "success";
   } catch {
+    ok = false;
     el.status = "error";
   }
   setTimeout(() => {
     el.status = "idle";
   }, resetMs);
+  return ok;
 }
 
 // Fires whatever "pressable" entity the user picked: script, scene, button or a toggle.
