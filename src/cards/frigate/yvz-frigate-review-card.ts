@@ -451,7 +451,8 @@ export class YvzFrigateReviewCard extends YvzCard<FrigateReviewConfig> {
     return { camera, when, detail };
   }
 
-  private preview(r: Review): string {
+  // Not called `preview`: Home Assistant sets a `preview` property on every card, which would replace the method.
+  private previewUrl(r: Review): string {
     if (r.end_time) return `/api/frigate/notifications/${encodeURIComponent(r.id)}/review_preview.gif?v=${Math.floor(r.end_time)}`;
     const detection = (r.data?.detections ?? [])[0] ?? r.id;
     return `/api/frigate/notifications/${encodeURIComponent(detection)}/thumbnail.jpg?v=${this.stamp}`;
@@ -470,7 +471,7 @@ export class YvzFrigateReviewCard extends YvzCard<FrigateReviewConfig> {
       @click=${() => this.open(r.id)}
     >
       <span class="media">
-        <img data-src=${this.preview(r)} alt="" draggable="false" @error=${(e: Event) => ((e.target as HTMLElement).style.visibility = "hidden")} />
+        <img data-src=${this.previewUrl(r)} alt="" draggable="false" @error=${(e: Event) => ((e.target as HTMLElement).style.visibility = "hidden")} />
         ${r.end_time ? nothing : html`<span class="live">${t("frigate.now")}</span>`}
         <span class="play"><ha-icon icon="mdi:play"></ha-icon></span>
       </span>

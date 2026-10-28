@@ -2,6 +2,16 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.10.1 — 2026-10-28
+
+### Fixed
+
+- Frigate review card: it rendered nothing in Home Assistant ("TypeError: this.preview is not a function"). Home Assistant sets a `preview` property on every card it creates, and that replaced the card's own method of the same name. The method is now called `previewUrl`. Checked every other card and editor in the bundle: no other member collides.
+
+### Added
+
+- Tests (`npm test`): the Frigate card renders its tiles with `preview` set to false and to true, before and after the first render, as Home Assistant does. Another test goes through every card and editor and fails when a method has the name of a property Home Assistant assigns (`preview`, `isPanel`, `layout`, `editMode`, `narrow`, `lovelace`, `context`, `hass`) or shadows a built-in element member. They run on every push and before a release is built.
+
 ## 0.10.0 — 2026-10-28
 
 ### Added

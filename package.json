@@ -1,6 +1,6 @@
 {
   "name": "yvz-cards",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "private": true,
   "description": "Custom Home Assistant dashboard cards",
   "type": "module",
@@ -8,14 +8,17 @@
     "dev": "vite build --watch --mode development",
     "playground": "vite --config vite.dev.config.ts",
     "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "lit": "^3.3.3"
   },
   "devDependencies": {
     "@mdi/js": "^7.4.47",
+    "happy-dom": "^21.0.4",
     "typescript": "^7.0.2",
-    "vite": "^8.3.5"
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
   }
 }

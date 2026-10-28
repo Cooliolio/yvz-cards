@@ -392,6 +392,7 @@ npm install
 npm run playground   # cards with fake Home Assistant states, at http://localhost:5173
 npm run dev          # rebuild dist/yvz-cards.js on every change
 npm run build        # type-check and build
+npm test             # render the cards the way Home Assistant does, and check their member names
 ```
 
 The playground lists the scenes on the left and has a row of states for each scene (for example the stove igniting or failing, the printer finished), controls for every entity, a light and dark theme, a language switch, a width and panel height slider and a switch that makes service calls fail. It remembers the scene and state across reloads, also in the address (`?scene=Stove&state=Igniting`), and the arrow keys move through scenes (up, down) and states (left, right).
