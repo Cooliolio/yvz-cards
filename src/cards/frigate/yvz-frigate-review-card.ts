@@ -26,11 +26,17 @@ const STALL_MS = 8000;
 const SIGN_SECONDS = 600;
 const DAY_MS = 86_400_000;
 
+// hls: the review as a playlist, which Safari and the iOS app play natively.
+// mp4: the recording, one file. It ignores range requests, which iOS often refuses.
+// clip: the detection clip, shorter than the review.
+type SourceKind = "hls" | "mp4" | "clip";
+
 interface Source {
   url: string;
-  // The detection clip: shorter than the review, and the one phones play most reliably.
-  short: boolean;
+  kind: SourceKind;
 }
+
+const HLS_TYPE = "application/vnd.apple.mpegurl";
 
 interface Playback {
   status: "loading" | "playing" | "failed";
@@ -51,6 +57,7 @@ export class YvzFrigateReviewCard extends YvzCard<FrigateReviewConfig> {
   @state() private first = 0;
   @state() private perPage = 2;
   @state() private playback: Playback = { status: "loading", short: false };
+  @state() private failures: string[] = [];
   @query(".strip") private strip?: HTMLElement;
   @query("video") private video?: HTMLVideoElement;
 
@@ -228,14 +235,15 @@ export class YvzFrigateReviewCard extends YvzCard<FrigateReviewConfig> {
     }
   }
 
-  private async clipUrl(r: Review): Promise<string> {
+  // The signed address of the review as a recording (mp4) or as a playlist (hls).
+  private async signedUrl(r: Review, kind: "mp4" | "hls"): Promise<string> {
     const o = this.opts;
     const start = Math.floor(r.start_time - o.pre);
     const endRaw = r.end_time ? r.end_time : Date.now() / 1000;
-    const end = Math.ceil(endRaw + (r.end_time ? o.post : 0));
-    const path =
-      `/api/frigate/${encodeURIComponent(o.instance)}/recording/` +
-      `${encodeURIComponent(r.camera)}/start/${start}/end/${Math.max(end, start + 1)}`;
+    const end = Math.max(Math.ceil(endRaw + (r.end_time ? o.post : 0)), start + 1);
+    const base = `/api/frigate/${encodeURIComponent(o.instance)}`;
+    const span = `${encodeURIComponent(r.camera)}/start/${start}/end/${end}`;
+    const path = kind === "mp4" ? `${base}/recording/${span}` : `${base}/vod/${span}/index.m3u8`;
     const res = await this.hass!.callWS<{ path: string }>({ type: "auth/sign_path", path, expires: SIGN_SECONDS });
     return res.path;
   }
@@ -252,28 +260,39 @@ export class YvzFrigateReviewCard extends YvzCard<FrigateReviewConfig> {
     void this.play(review);
   }
 
-  // The full clip first; when it doesn't play (it answers 400 "No recordings found" for some events, and
-  // ignores range requests, which iOS Safari often refuses) the detection clip, which phones play reliably.
+  // What plays depends on the device. Safari and the iOS app play HLS and often refuse the plain recording
+  // (it ignores range requests, and may be H.265), so they start with the playlist; everything else starts
+  // with the recording. Then the other one, then the detection clip, which is short but plays almost anywhere.
   private async play(review: Review): Promise<void> {
     const token = ++this.token;
     clearTimeout(this.stall);
+    this.failures = [];
     this.playback = { status: "loading", short: false };
-    let main: string | undefined;
-    try {
-      main = await this.clipUrl(review);
-    } catch {
-      main = undefined;
-    }
+    const [mp4, hls] = await Promise.allSettled([this.signedUrl(review, "mp4"), this.signedUrl(review, "hls")]);
     if (token !== this.token) return;
+    const url = (r: PromiseSettledResult<string>) => (r.status === "fulfilled" ? r.value : undefined);
+    const probe = this.video ?? document.createElement("video");
+    const hlsFirst = !!probe.canPlayType?.(HLS_TYPE);
+    const full: Array<Source | undefined> = [
+      url(mp4) ? { url: url(mp4)!, kind: "mp4" } : undefined,
+      url(hls) ? { url: url(hls)!, kind: "hls" } : undefined,
+    ];
+    if (hlsFirst) full.reverse();
     const detection = [...(review.data?.detections ?? [])].sort()[0];
     this.sources = [
-      main ? { url: main, short: false } : undefined,
+      ...full,
       detection
-        ? { url: `/api/frigate/notifications/${encodeURIComponent(detection)}/${encodeURIComponent(review.camera)}/clip.mp4`, short: true }
+        ? { url: `/api/frigate/notifications/${encodeURIComponent(detection)}/${encodeURIComponent(review.camera)}/clip.mp4`, kind: "clip" as const }
         : undefined,
-    ].filter((s): s is Source => !!s);
-    this.playback = { status: "loading", short: false, link: main };
+    ].filter((src): src is Source => !!src);
+    this.playback = { status: "loading", short: false, link: url(mp4) ?? url(hls) };
     this.attempt(token, 0);
+  }
+
+  // The step that failed and how, small enough for a phone: "mp4 failed: code 4".
+  private fail(kind: SourceKind, code?: number): void {
+    const t = this.t;
+    this.failures = [...this.failures, code === undefined ? t("frigate.timed_out", { type: kind }) : t("frigate.failed", { type: kind, code })];
   }
 
   private attempt(token: number, index: number): void {
@@ -288,13 +307,15 @@ export class YvzFrigateReviewCard extends YvzCard<FrigateReviewConfig> {
     const video = this.video;
     if (!video) return;
     this.attemptAt = index;
-    this.playback = { status: "loading", short: source.short, link: this.playback.link };
+    this.playback = { status: "loading", short: source.kind === "clip", link: this.playback.link };
     // Muted and inline, or phones won't start it; play() may still be refused, which is no reason to stop.
     video.muted = true;
     video.src = source.url;
     video.play()?.catch(() => {});
     this.stall = setTimeout(() => {
-      if (token === this.token && this.playback.status === "loading") this.attempt(token, index + 1);
+      if (token !== this.token || this.playback.status !== "loading") return;
+      this.fail(source.kind);
+      this.attempt(token, index + 1);
     }, STALL_MS);
   }
 
@@ -306,6 +327,8 @@ export class YvzFrigateReviewCard extends YvzCard<FrigateReviewConfig> {
 
   private onVideoError = (): void => {
     if (!this.selected || this.playback.status === "failed") return;
+    const source = this.sources[this.attemptAt];
+    if (source) this.fail(source.kind, this.video?.error?.code ?? 0);
     this.attempt(this.token, this.attemptAt + 1);
   };
 
@@ -526,6 +549,7 @@ export class YvzFrigateReviewCard extends YvzCard<FrigateReviewConfig> {
             </div>`
           : nothing}
       </div>
+      ${this.failures.length ? html`<p class="diag">${this.failures.join(" · ")}</p>` : nothing}
       <div class="bar">
         <yvz-icon-button
           raised
@@ -813,6 +837,15 @@ export class YvzFrigateReviewCard extends YvzCard<FrigateReviewConfig> {
         color: #fff;
         font-size: var(--yvz-text-body);
         text-decoration: none;
+      }
+
+      /* which step failed and how, for finding out why a clip doesn't play on a phone */
+      .diag {
+        margin: 0;
+        color: var(--yvz-text-muted);
+        font-size: var(--yvz-text-caption);
+        line-height: var(--yvz-line-caption);
+        font-variant-numeric: tabular-nums;
       }
 
       .bar {

@@ -139,6 +139,8 @@ const tr: Dictionary = {
   "frigate.seconds": "{count} sn",
   "frigate.yesterday": "dün",
   "frigate.play": "{camera} {when} oynat",
+  "frigate.failed": "{type} başarısız: kod {code}",
+  "frigate.timed_out": "{type} zaman aşımı",
   "frigate.older": "Daha eski",
   "frigate.newer": "Daha yeni",
   "frigate.close": "Kapat",

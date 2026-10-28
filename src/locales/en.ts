@@ -137,6 +137,8 @@ const en = {
   "frigate.seconds": "{count}s",
   "frigate.yesterday": "yesterday",
   "frigate.play": "Play {camera} {when}",
+  "frigate.failed": "{type} failed: code {code}",
+  "frigate.timed_out": "{type} timed out",
   "frigate.older": "Older",
   "frigate.newer": "Newer",
   "frigate.close": "Close",

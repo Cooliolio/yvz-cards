@@ -7,6 +7,8 @@ import { defineConfig, type Plugin } from "vite";
 //   oprit    the full clip plays (without range support, like the real recording endpoint)
 //   veranda  the full clip answers 400 "No recordings found", the short clip plays
 //   garage   neither clip is available
+//   (the playlist for HLS answers for every camera but garage; Chrome can't play it, so it fails with code 4
+//   and the card moves on, like a device that can't use it)
 //   tuin     the full clip never answers, so the card has to give up on it and use the short one
 function fakeFrigate(): Plugin {
   const clip = fs.readFileSync(path.resolve("dev/fixtures/clip.mp4"));
@@ -41,6 +43,13 @@ function fakeFrigate(): Plugin {
           if (parts[5] === "clip.mp4") {
             return parts[4] === "garage" ? send(404, "application/json", '{"message":"Not found"}') : video(true);
           }
+        }
+        // /api/frigate/<instance>/vod/<camera>/start/<s>/end/<e>/index.m3u8
+        if (parts[3] === "vod") {
+          const playlist = "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nsegment-0.ts\n#EXT-X-ENDLIST\n";
+          return parts[4] === "garage"
+            ? send(404, "application/json", '{"message":"No recordings found"}')
+            : send(200, "application/vnd.apple.mpegurl", playlist);
         }
         // /api/frigate/<instance>/recording/<camera>/start/<s>/end/<e>
         if (parts[3] === "recording" || parts[2] === "recording") {

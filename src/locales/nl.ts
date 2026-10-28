@@ -139,6 +139,8 @@ const nl: Dictionary = {
   "frigate.seconds": "{count}s",
   "frigate.yesterday": "gisteren",
   "frigate.play": "Speel {camera} {when} af",
+  "frigate.failed": "{type} mislukt: code {code}",
+  "frigate.timed_out": "{type} time-out",
   "frigate.older": "Oudere",
   "frigate.newer": "Nieuwere",
   "frigate.close": "Sluiten",
