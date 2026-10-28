@@ -7,6 +7,8 @@ export interface SegmentOption {
   value: string;
   label: string;
   icon?: string;
+  // A CSS gradient shown as a small strip before the label, e.g. the colours the option covers.
+  hint?: string;
   // Colour of this option when selected; defaults to the surrounding --yvz-state.
   state?: YvzState;
 }
@@ -86,8 +88,17 @@ export class YvzSegmented extends LitElement {
         color: var(--yvz-text);
       }
 
+      /* a surrounding card can set --yvz-on-state when its fill is a colour white can't be read on */
       button[aria-checked="true"] {
-        color: #fff;
+        color: var(--yvz-on-state, #fff);
+      }
+
+      .hint {
+        flex: none;
+        width: 20px;
+        height: 8px;
+        border-radius: var(--yvz-radius-pill);
+        box-shadow: 0 0 0 1.5px color-mix(in srgb, currentColor 45%, transparent);
       }
 
       button:disabled {
@@ -128,7 +139,7 @@ export class YvzSegmented extends LitElement {
             ?disabled=${this.disabled}
             @click=${() => this.pick(o.value)}
           >
-            ${o.icon ? html`<ha-icon .icon=${o.icon}></ha-icon>` : ""}${o.label}
+            ${o.hint ? html`<i class="hint" style="background: ${o.hint}"></i>` : o.icon ? html`<ha-icon .icon=${o.icon}></ha-icon>` : ""}${o.label}
           </button>`,
         )}
       </div>

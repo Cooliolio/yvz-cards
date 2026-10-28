@@ -81,6 +81,8 @@ export function pressHandlers(ctx: BlockContext, config: ActionsConfig) {
   };
   return {
     down: (e: Event) => {
+      // Only the main button presses; right-click has its own handler.
+      if ((e as PointerEvent).button > 0) return;
       const p = state(e);
       p.held = false;
       clearTimeout(p.timer);
@@ -100,10 +102,20 @@ export function pressHandlers(ctx: BlockContext, config: ActionsConfig) {
       }
       runAction(ctx, config.entity, tap);
     },
+    // Right-click with a mouse is the hold. A long press on a phone also raises this event, but the timer
+    // above already handles that one, so touch only has the browser's own menu suppressed.
+    menu: (e: Event) => {
+      if (hold.action === "none") return;
+      e.preventDefault();
+      if ((e as PointerEvent).pointerType === "touch") return;
+      clearTimeout(state(e).timer);
+      runAction(ctx, config.entity, hold);
+    },
     key: (e: KeyboardEvent) => {
       if (e.key !== "Enter" && e.key !== " ") return;
       e.preventDefault();
-      runAction(ctx, config.entity, tap);
+      // Shift with Enter or Space is the hold, for the keyboard.
+      runAction(ctx, config.entity, e.shiftKey && hold.action !== "none" ? hold : tap);
     },
   };
 }

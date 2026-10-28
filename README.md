@@ -273,6 +273,59 @@ trend: true
 | `trend`, `trend_hours` | `false`, `24` | A trend line under the gauge. |
 | `tap_action`, `hold_action` | more-info, none | `more-info`, `toggle`, `call-service`, `navigate`, `url` or `none`. |
 
+## Light card
+
+`custom:yvz-light-card` — one light (or a light group, which Home Assistant treats as one light). Tap toggles, hold opens more-info. The card shows as much as the light can do:
+
+- **toggle**: the icon, name and state, tinted with the light's colour while it is on.
+- **brightness**: adds a brightness slider.
+- **color**: adds colour temperature, hue and saturation (with a switch when the light has both), favourite colours and effects.
+
+```yaml
+type: custom:yvz-light-card
+entity: light.living_room
+controls: auto # auto | toggle | brightness | color
+```
+
+| Option | Default | |
+| --- | --- | --- |
+| `entity` | | A `light.` entity. |
+| `name`, `icon` | the light's | |
+| `controls` | `auto` | The most to show. A light that can't do it shows what it can. |
+| `compact` | `false` | One row: icon, name and a brightness slider. Colour is one hold away, in more-info. |
+| `effects` | all the light has | Only these effects, in this order. |
+| `tap_action` | `toggle` | |
+| `hold_action` | `more-info` | |
+
+Hold works everywhere: press and hold with a finger or the mouse, right-click on a desktop, or Shift with Enter on the keyboard.
+
+Favourite colours are the ones set in the light's more-info dialog. Without admin rights the card shows the same defaults the dialog starts with: four whites across the light's range and, for colour lights, blue, purple, pink and red.
+
+## Light scenes card
+
+`custom:yvz-light-scene-card` — lighting scenes for one light, a light group, or several lights set together. Tap a scene to apply it; the one the light is showing is highlighted in its own colour. The scenes live in the card config, in the terms of `light.turn_on`:
+
+```yaml
+type: custom:yvz-light-scene-card
+name: Living room
+entity: light.living_room # or entities: [light.a, light.b]
+columns: 3 # default: as many as fit
+scenes:
+  - name: Relax
+    icon: mdi:sofa
+    brightness: 60 # percent
+    color_temp_kelvin: 2700
+  - name: Movie
+    brightness: 15
+    hs_color: [25, 80] # or rgb_color: [255, 120, 40]
+  - name: Candle
+    effect: Candle
+  - name: Off
+    off: true
+```
+
+A scene may set `brightness`, one of `color_temp_kelvin`, `hs_color` or `rgb_color`, and an `effect`. A light that can't do one of them ignores it, in the highlight as well. With several lights the scene is highlighted only while all of them show it, and a light that is unavailable doesn't count.
+
 ## Printer card
 
 ```yaml

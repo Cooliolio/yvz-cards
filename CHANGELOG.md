@@ -2,6 +2,16 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.11.0 — 2026-10-28
+
+### Added
+
+- Light scenes card (`yvz-light-scene-card`): scenes for one light, a group or several lights, with brightness, colour or colour temperature and effect; the active one is highlighted in its own colour.
+- Light card (`yvz-light-card`): toggle, brightness, colour temperature, hue and saturation, favourite colours and effects, as far as the light supports them. `controls` picks how much to show; the default is everything the light can do.
+- Light card: `compact: true` shows one row (icon, name, brightness slider). Controls open and close with a short animation, switching between temperature and colour fades, and the badge breathes while an effect runs. Text on the light's colour is dark on light colours and white on dark ones, and the temperature / colour switch shows the colours it covers.
+- Hold action on a desktop: right-click runs it, and Shift with Enter or Space does from the keyboard (light and gauge cards). Press-and-hold with the mouse already worked.
+- Design system: `yvz-segmented` options take a `hint` gradient and buttons follow `--yvz-on-state`; `yvz-slider` takes a `gradient` and `thumb` for temperature and hue scales; new `yvz-swatches` for a row of colour buttons.
+
 ## 0.10.3 — 2026-10-28
 
 v0.10.2 was published by mistake, without its file (`yvz-cards.js`), and describes an approach that was dropped. Skip it: everything it was meant to contain is in this release.

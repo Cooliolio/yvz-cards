@@ -4,6 +4,8 @@ import { designStyles } from "../styles";
 
 // Horizontal slider on a native range input, so keyboard, touch and screen readers just work.
 // Emits yvz-input with the value while dragging and yvz-change once it is let go.
+// With a `gradient` the track is that gradient (a temperature or hue scale) instead of a fill, a little thicker,
+// and the thumb takes the `thumb` colour, so it shows the colour it is on.
 @customElement("yvz-slider")
 export class YvzSlider extends LitElement {
   @property({ type: Number }) value = 0;
@@ -12,6 +14,10 @@ export class YvzSlider extends LitElement {
   @property({ type: Number }) step = 1;
   @property() label = "";
   @property({ type: Boolean, reflect: true }) disabled = false;
+  // A CSS gradient for the track, e.g. "linear-gradient(90deg, ...)".
+  @property({ reflect: true }) gradient = "";
+  // The thumb's colour on a gradient track.
+  @property() thumb = "";
 
   static override styles = [
     designStyles,
@@ -25,6 +31,7 @@ export class YvzSlider extends LitElement {
 
       input {
         --_thumb: 20px;
+        --_track: var(--yvz-slider-track-height, 4px);
         --_fill: var(--yvz-state, var(--yvz-accent));
         flex: 1;
         min-width: 0;
@@ -47,21 +54,36 @@ export class YvzSlider extends LitElement {
 
       /* the fill is a hard-stop gradient driven by --_pct, so no extra element is needed */
       input::-webkit-slider-runnable-track {
-        height: 4px;
+        height: var(--_track);
         border-radius: var(--yvz-radius-pill);
-        background: linear-gradient(var(--_fill), var(--_fill)) 0 / var(--_pct) 100% no-repeat var(--yvz-divider);
+        background: var(--_bg, linear-gradient(var(--_fill), var(--_fill)) 0 / var(--_pct) 100% no-repeat var(--yvz-divider));
       }
 
       input::-moz-range-track {
-        height: 4px;
+        height: var(--_track);
         border-radius: var(--yvz-radius-pill);
-        background: linear-gradient(var(--_fill), var(--_fill)) 0 / var(--_pct) 100% no-repeat var(--yvz-divider);
+        background: var(--_bg, linear-gradient(var(--_fill), var(--_fill)) 0 / var(--_pct) 100% no-repeat var(--yvz-divider));
+      }
+
+      :host([gradient]) input {
+        --_track: 10px;
+        --_fill: var(--_thumb-color, #fff);
+      }
+
+      :host([gradient]) input::-webkit-slider-thumb {
+        border: 3px solid #fff;
+        box-shadow: 0 0 0 1px rgb(0 0 0 / 0.25);
+      }
+
+      :host([gradient]) input::-moz-range-thumb {
+        border: 3px solid #fff;
+        box-shadow: 0 0 0 1px rgb(0 0 0 / 0.25);
       }
 
       input::-webkit-slider-thumb {
         width: var(--_thumb);
         height: var(--_thumb);
-        margin-top: calc((4px - var(--_thumb)) / 2);
+        margin-top: calc((var(--_track) - var(--_thumb)) / 2);
         border: 0;
         border-radius: 50%;
         background: var(--_fill);
@@ -116,7 +138,7 @@ export class YvzSlider extends LitElement {
     return html`<input
       type="range"
       aria-label=${this.label}
-      style="--_pct: ${pct}%"
+      style="--_pct: ${pct}%${this.gradient ? `; --_bg: ${this.gradient}; --_thumb-color: ${this.thumb || "#fff"}` : ""}"
       min=${this.min}
       max=${this.max}
       step=${this.step}

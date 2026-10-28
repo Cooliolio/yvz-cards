@@ -14,6 +14,7 @@ export type { BannerTone } from "./components/yvz-banner";
 export type { SegmentOption } from "./components/yvz-segmented";
 export type { TileBadge } from "./components/yvz-tile";
 export type { Bar } from "./components/yvz-bars";
+export type { Swatch } from "./components/yvz-swatches";
 export type { StatTrend } from "./components/yvz-stat";
 export type { TimelinePoint } from "./components/yvz-timeline";
 
@@ -42,5 +43,6 @@ import "./components/yvz-note";
 import "./components/yvz-camera";
 import "./components/yvz-number-field";
 import "./components/yvz-dots";
+import "./components/yvz-swatches";
 import "./components/yvz-bars";
 import "./components/yvz-timeline";

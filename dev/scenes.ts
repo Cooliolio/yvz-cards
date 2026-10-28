@@ -1,3 +1,4 @@
+import { hsToRgb, temperatureToRgb } from "../src/cards/light/color";
 import { TESLA_ENTITIES, type TeslaEntityKey } from "../src/cards/tesla/types";
 import type { HassDevice, HassEntity, HassEntityRegistryEntry } from "../src/shared/types";
 
@@ -864,6 +865,170 @@ const gaugeCard: Scene = {
   },
 };
 
+// Four lights with different abilities: on/off, dimmable, white temperature, and colour with temperature.
+const lightCard: Scene = {
+  name: "Light card",
+  tag: "yvz-light-card",
+  width: 360,
+  config: { type: "custom:yvz-light-card", entity: "light.living_room" },
+  // In order: each kind of light on auto, then the same lights held back or shown compact.
+  extra: [
+    { type: "custom:yvz-light-card", entity: "light.stairs" },
+    { type: "custom:yvz-light-card", entity: "light.desk" },
+    { type: "custom:yvz-light-card", entity: "light.hall" },
+    { type: "custom:yvz-light-card", entity: "light.offline" },
+    { type: "custom:yvz-light-card", entity: "light.living_room", name: "Only brightness", controls: "brightness" },
+    { type: "custom:yvz-light-card", entity: "light.living_room", name: "Only a toggle", controls: "toggle" },
+    { type: "custom:yvz-light-card", entity: "light.living_room", name: "Two effects, own icon", icon: "mdi:sofa", effects: ["Candle", "Pulse"] },
+    { type: "custom:yvz-light-card", entity: "light.living_room", name: "Compact, colour light", compact: true },
+    { type: "custom:yvz-light-card", entity: "light.stairs", compact: true },
+    { type: "custom:yvz-light-card", entity: "light.hall", compact: true },
+    { type: "custom:yvz-light-card", entity: "light.hall", name: "Hold for more-info, tap runs a script", tap_action: { action: "call-service", perform_action: "script.demo" } },
+  ],
+  controls: [
+    { key: "living", label: "Living room on", type: "checkbox", value: true },
+    { key: "livingBrightness", label: "Living room brightness", type: "range", value: 180, min: 1, max: 255, step: 1 },
+    { key: "livingMode", label: "Living room mode", type: "select", value: "color_temp", options: ["color_temp", "hs"] },
+    { key: "livingEffect", label: "Living room effect", type: "select", value: "none", options: ["none", "Rainbow", "Candle", "Pulse"] },
+    { key: "livingKelvin", label: "Living room kelvin", type: "range", value: 2700, min: 2000, max: 6500, step: 50 },
+    { key: "livingHue", label: "Living room hue", type: "range", value: 25, min: 0, max: 360, step: 1 },
+    { key: "livingSaturation", label: "Living room saturation", type: "range", value: 80, min: 0, max: 100, step: 1 },
+    { key: "hall", label: "Hall on (on/off only)", type: "checkbox", value: false },
+    { key: "desk", label: "Desk on (dimmable)", type: "checkbox", value: true },
+    { key: "deskBrightness", label: "Desk brightness", type: "range", value: 120, min: 1, max: 255, step: 1 },
+    { key: "stairs", label: "Stairs on (temperature)", type: "checkbox", value: true },
+    { key: "stairsKelvin", label: "Stairs kelvin", type: "range", value: 3500, min: 2200, max: 6000, step: 50 },
+  ],
+  states(v) {
+    const color = v.livingMode === "hs";
+    const hs = [Number(v.livingHue), Number(v.livingSaturation)];
+    const rgb = color ? hsToRgb(hs[0], hs[1]) : temperatureToRgb(Number(v.livingKelvin));
+    const living = v.living
+      ? entity("light.living_room", "on", {
+          friendly_name: "Living room",
+          supported_color_modes: ["color_temp", "hs"],
+          supported_features: 4,
+          effect_list: ["Rainbow", "Candle", "Pulse"],
+          effect: String(v.livingEffect),
+          color_mode: color ? "hs" : "color_temp",
+          brightness: Number(v.livingBrightness),
+          color_temp_kelvin: color ? null : Number(v.livingKelvin),
+          hs_color: color ? hs : null,
+          rgb_color: rgb,
+          min_color_temp_kelvin: 2000,
+          max_color_temp_kelvin: 6500,
+        })
+      : entity("light.living_room", "off", {
+          friendly_name: "Living room",
+          supported_color_modes: ["color_temp", "hs"],
+          supported_features: 4,
+          color_mode: null,
+          min_color_temp_kelvin: 2000,
+          max_color_temp_kelvin: 6500,
+        });
+    const stairsKelvin = Number(v.stairsKelvin);
+    const list = [
+      living,
+      entity("light.offline", "unavailable", { friendly_name: "Garage (offline)" }),
+      entity("light.hall", v.hall ? "on" : "off", { friendly_name: "Hall", supported_color_modes: ["onoff"], color_mode: v.hall ? "onoff" : null }),
+      entity("light.desk", v.desk ? "on" : "off", {
+        friendly_name: "Desk",
+        supported_color_modes: ["brightness"],
+        color_mode: v.desk ? "brightness" : null,
+        brightness: v.desk ? Number(v.deskBrightness) : null,
+      }),
+      entity("light.stairs", v.stairs ? "on" : "off", {
+        friendly_name: "Stairs",
+        supported_color_modes: ["color_temp"],
+        color_mode: v.stairs ? "color_temp" : null,
+        brightness: v.stairs ? 200 : null,
+        color_temp_kelvin: v.stairs ? stairsKelvin : null,
+        rgb_color: v.stairs ? temperatureToRgb(stairsKelvin) : null,
+        min_color_temp_kelvin: 2200,
+        max_color_temp_kelvin: 6000,
+      }),
+    ];
+    return Object.fromEntries(list.map((e) => [e.entity_id, e]));
+  },
+  service(domain, service, data, v): Record<string, ControlValue> | void {
+    if (domain !== "light" && domain !== "homeassistant") return;
+    const key = { "light.living_room": "living", "light.hall": "hall", "light.desk": "desk", "light.stairs": "stairs" }[String(data.entity_id)];
+    if (!key) return;
+    const patch: Record<string, ControlValue> = {};
+    if (service === "toggle") patch[key] = !v[key];
+    if (service === "turn_off") patch[key] = false;
+    if (service === "turn_on") {
+      patch[key] = true;
+      const prefix = key === "living" ? "living" : key;
+      if (typeof data.effect === "string") patch.livingEffect = data.effect;
+      if (data.brightness_pct !== undefined) patch[`${prefix}Brightness`] = Math.round((Number(data.brightness_pct) * 255) / 100);
+      if (data.color_temp_kelvin !== undefined) {
+        patch[key === "stairs" ? "stairsKelvin" : "livingKelvin"] = Number(data.color_temp_kelvin);
+        if (key === "living") patch.livingMode = "color_temp";
+      }
+      if (Array.isArray(data.hs_color)) Object.assign(patch, { livingMode: "hs", livingHue: Number(data.hs_color[0]), livingSaturation: Number(data.hs_color[1]) });
+      if (Array.isArray(data.rgb_color)) {
+        const [r, g, b] = data.rgb_color.map(Number);
+        const max = Math.max(r, g, b);
+        const d = max - Math.min(r, g, b);
+        const h = !d ? 0 : max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+        Object.assign(patch, { livingMode: "hs", livingHue: Math.round((h * 60 + 360) % 360), livingSaturation: max ? Math.round((d / max) * 100) : 0 });
+      }
+    }
+    return patch;
+  },
+};
+
+const LIVING_SCENES = [
+  { name: "Bright", icon: "mdi:white-balance-sunny", brightness: 100, color_temp_kelvin: 4500 },
+  { name: "Relax", icon: "mdi:sofa", brightness: 60, color_temp_kelvin: 2700 },
+  { name: "Movie", icon: "mdi:movie-open", brightness: 15, hs_color: [25, 80] },
+  { name: "Party", icon: "mdi:party-popper", brightness: 90, hs_color: [300, 90], effect: "Rainbow" },
+  { name: "Candle", icon: "mdi:candle", brightness: 40, color_temp_kelvin: 2200, effect: "Candle" },
+  { name: "Off", icon: "mdi:lightbulb-off-outline", off: true },
+];
+
+// The lighting scene card on the same lights as the light card: one light, a group of lights, and a dimmable one.
+const lightScenes: Scene = {
+  ...lightCard,
+  name: "Light scenes",
+  config: { type: "custom:yvz-light-scene-card", entity: "light.living_room", name: "Living room", scenes: LIVING_SCENES },
+  extra: [
+    {
+      type: "custom:yvz-light-scene-card",
+      name: "Downstairs, three lights together",
+      entities: ["light.living_room", "light.desk", "light.stairs"],
+      columns: 4,
+      scenes: [
+        { name: "Day", icon: "mdi:weather-sunny", brightness: 100, color_temp_kelvin: 4000 },
+        { name: "Evening", icon: "mdi:weather-sunset", brightness: 50, color_temp_kelvin: 2700 },
+        { name: "Night", icon: "mdi:weather-night", brightness: 5, color_temp_kelvin: 2200 },
+        { name: "All off", icon: "mdi:power", off: true },
+      ],
+    },
+    {
+      type: "custom:yvz-light-scene-card",
+      entity: "light.desk",
+      scenes: [
+        { name: "Focus", icon: "mdi:book-open-variant", brightness: 100 },
+        { name: "Soft", icon: "mdi:lamp", brightness: 30 },
+        { name: "Off", off: true },
+      ],
+    },
+    { type: "custom:yvz-light-scene-card", entity: "light.hall", scenes: [{ name: "On", icon: "mdi:lightbulb-on", brightness: 100 }, { name: "Off", off: true }] },
+    { type: "custom:yvz-light-scene-card", entity: "light.offline", scenes: [{ name: "On", brightness: 100 }, { name: "Off", off: true }] },
+    { type: "custom:yvz-light-scene-card", entity: "light.stairs" },
+  ],
+  service(domain, service, data, v): Record<string, ControlValue> | void {
+    const ids = Array.isArray(data.entity_id) ? data.entity_id.map(String) : [String(data.entity_id)];
+    let patch: Record<string, ControlValue> = {};
+    for (const id of ids) {
+      patch = { ...patch, ...lightCard.service?.(domain, service, { ...data, entity_id: id }, { ...v, ...patch }) };
+    }
+    return patch;
+  },
+};
+
 // A stand-in for the camera: a dark bench with a build plate, in the shape the camera asks for.
 const printerPicture = (shape: string): string => {
   const [w, h] = shape.split(":").map(Number);
@@ -1046,4 +1211,4 @@ const frigate: Scene = {
   ],
 };
 
-export const scenes: Scene[] = [host, heating, heatingStats, tesla, gaugeCard, stove, printer, frigate, gauges];
+export const scenes: Scene[] = [host, heating, heatingStats, tesla, gaugeCard, lightCard, lightScenes, stove, printer, frigate, gauges];

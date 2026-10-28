@@ -42,6 +42,7 @@ export function renderGaugeBlock(ctx: BlockContext, c: GaugeBlockConfig): Templa
     @pointerleave=${press.cancel}
     @pointercancel=${press.cancel}
     @click=${press.click}
+    @contextmenu=${press.menu}
     @keydown=${press.key}
   >
     <yvz-gauge

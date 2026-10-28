@@ -7,6 +7,8 @@ export interface TileBadge {
   icon: string;
   // Tints the icon; ignored while the tile is selected so it stays readable on the fill.
   state?: YvzState;
+  // Takes the surrounding --yvz-state colour instead, for a tile that sets its own.
+  tint?: boolean;
 }
 
 // Tappable tile for a grid of choices: label on top, a value below, small badges in the corner.
@@ -78,7 +80,7 @@ export class YvzTile extends LitElement {
       :host([selected]) button {
         background: var(--yvz-state, var(--yvz-accent));
         box-shadow: none;
-        color: #fff;
+        color: var(--yvz-on-state, #fff);
       }
 
       /* a disabled selection keeps its place but drops the loud fill */
@@ -120,7 +122,8 @@ export class YvzTile extends LitElement {
         color: var(--yvz-text-muted);
       }
 
-      ha-icon[data-state] {
+      ha-icon[data-state],
+      ha-icon[data-tint] {
         color: var(--yvz-state);
       }
 
@@ -162,7 +165,7 @@ export class YvzTile extends LitElement {
     return html`<button type="button" ?disabled=${this.disabled} aria-pressed=${this.selected} aria-label=${aria}>
       <span class="top">
         <span class="label">${this.label}</span>
-        ${this.badges.map((b) => html`<ha-icon .icon=${b.icon} data-state=${b.state ?? nothing}></ha-icon>`)}
+        ${this.badges.map((b) => html`<ha-icon .icon=${b.icon} data-state=${b.state ?? nothing} data-tint=${b.tint ? "" : nothing}></ha-icon>`)}
       </span>
       ${this.steps > 0
         ? html`<span class="dots" aria-hidden="true"
