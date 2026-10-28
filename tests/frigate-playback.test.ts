@@ -27,12 +27,15 @@ const hass = {
   },
 } as never;
 
-// What the card sees of the player: which address it set, and how that went.
-type Card = YvzFrigateReviewCard & {
+type Card = YvzFrigateReviewCard;
+
+// What the card keeps of the player, which is private: the addresses it will try and how it is doing.
+interface Internals {
   sources: Array<{ kind: string; url: string }>;
   playback: { status: string; short: boolean; link?: string };
-  video?: HTMLVideoElement;
-};
+}
+
+const inner = (card: Card): Internals => card as unknown as Internals;
 
 function canPlay(hls: boolean): void {
   vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((type: string) => (hls && /mpegurl/i.test(type) ? "maybe" : ""));
@@ -45,7 +48,7 @@ async function openPlayer(): Promise<Card> {
   document.body.append(card);
   await vi.waitFor(() => expect(card.shadowRoot?.querySelector(".tile")).toBeTruthy());
   card.shadowRoot!.querySelector<HTMLElement>(".tile")!.click();
-  await vi.waitFor(() => expect(card.sources?.length).toBeGreaterThan(0));
+  await vi.waitFor(() => expect(inner(card).sources?.length).toBeGreaterThan(0));
   return card;
 }
 
@@ -56,7 +59,7 @@ function failWith(card: Card, code: number): void {
   video.dispatchEvent(new Event("error"));
 }
 
-const kinds = (card: Card) => card.sources.map((s) => s.kind);
+const kinds = (card: Card) => inner(card).sources.map((s) => s.kind);
 const attribute = (card: Card) => card.shadowRoot!.querySelector("video")!.getAttribute("src") ?? "";
 const diag = (card: Card) => card.shadowRoot!.querySelector(".diag")?.textContent ?? "";
 
@@ -98,7 +101,7 @@ describe("clip playback order", () => {
   it("uses the detection clip's address last", async () => {
     canPlay(true);
     const card = await openPlayer();
-    expect(card.sources.at(-1)?.url).toBe("/api/frigate/notifications/det-1/oprit/clip.mp4");
+    expect(inner(card).sources.at(-1)?.url).toBe("/api/frigate/notifications/det-1/oprit/clip.mp4");
   });
 
   it("keeps the video muted and inline", async () => {
@@ -131,7 +134,7 @@ describe("when a source fails", () => {
       failWith(card, code);
       await card.updateComplete;
     }
-    await vi.waitFor(() => expect(card.playback.status).toBe("failed"));
+    await vi.waitFor(() => expect(inner(card).playback.status).toBe("failed"));
     const root = card.shadowRoot!;
     expect(root.querySelector(".failed p")?.textContent).toBe("Clip not available for this event");
     expect(root.querySelector(".failed a")?.getAttribute("href")).toContain("/recording/oprit/");
