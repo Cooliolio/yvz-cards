@@ -530,6 +530,7 @@ const tr: Dictionary = {
   "lightscene.field.name": "Ad",
   "lightscene.field.columns": "Sütunlar (boş = otomatik)",
   "lightscene.field.scenes": "Sahneler",
+  "light.field.show_status": "Adın altında durumu göster",
 };
 
 export default tr;

@@ -45,6 +45,36 @@ interface Hold {
 
 const TIERS: LightControls[] = ["toggle", "brightness", "color"];
 
+// The narrow header: badge and status on the first row, the name across the card under them.
+const narrowHeadBody = css`
+  grid-template-areas:
+    "badge status"
+    "name name";
+  row-gap: var(--yvz-space-2);
+`;
+
+const narrowHead = css`
+  .head {
+    ${narrowHeadBody}
+  }
+
+  .head[data-no-status] {
+    grid-template-areas:
+      "badge badge"
+      "name name";
+  }
+
+  .name {
+    align-self: start;
+  }
+
+  .status {
+    align-self: center;
+    justify-self: end;
+    text-align: end;
+  }
+`;
+
 @customElement("yvz-light-card")
 export class YvzLightCard extends YvzCard<LightCardConfig> {
   // What the user is dragging, and after letting go still shown until the light reports it back (see holds).
@@ -220,10 +250,12 @@ export class YvzLightCard extends YvzCard<LightCardConfig> {
     const tier = this.tier();
     const open = on && !gone && tier !== "toggle";
     const compact = this.config.compact === true;
+    const showStatus = this.config.show_status !== false;
 
     return html`<ha-card class=${compact ? "compact" : ""} data-state=${gone ? "unavailable" : on ? "on" : "off"} style=${on ? style : nothing}>
       <div
         class="head ${actionable ? "tap" : ""}"
+        ?data-no-status=${!showStatus}
         role=${actionable ? "button" : nothing}
         tabindex=${actionable ? 0 : nothing}
         aria-pressed=${on}
@@ -237,10 +269,8 @@ export class YvzLightCard extends YvzCard<LightCardConfig> {
         @keydown=${press.key}
       >
         <yvz-icon-badge class=${running ? "fx" : ""} size=${compact ? "md" : "lg"} .icon=${icon}></yvz-icon-badge>
-        <div class="text">
-          <div class="name">${name}</div>
-          <div class="status">${status}</div>
-        </div>
+        <div class="name">${name}</div>
+        ${showStatus ? html`<div class="status">${status}</div>` : nothing}
       </div>
       ${tier === "toggle" ? nothing : html`<div class="collapse" ?data-open=${open} ?inert=${!open}><div class="inner">${this.renderControls()}</div></div>`}
     </ha-card>`;
@@ -370,6 +400,11 @@ export class YvzLightCard extends YvzCard<LightCardConfig> {
   static override styles: CSSResultGroup = [
     YvzCard.styles,
     css`
+      /* the layout follows the card's own width, not the screen's */
+      :host {
+        container-type: inline-size;
+      }
+
       ha-card {
         gap: var(--yvz-space-3);
         justify-content: center;
@@ -380,12 +415,20 @@ export class YvzLightCard extends YvzCard<LightCardConfig> {
       }
 
       .head {
-        display: flex;
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-areas:
+          "badge name"
+          "badge status";
         align-items: center;
-        gap: var(--yvz-space-3);
+        column-gap: var(--yvz-space-3);
         min-width: 0;
         border-radius: var(--yvz-radius-md);
         outline-offset: 2px;
+      }
+
+      .head[data-no-status] {
+        grid-template-areas: "badge name";
       }
 
       .head.tap {
@@ -393,18 +436,26 @@ export class YvzLightCard extends YvzCard<LightCardConfig> {
         -webkit-tap-highlight-color: transparent;
       }
 
-      .text {
-        min-width: 0;
+      yvz-icon-badge {
+        grid-area: badge;
       }
 
       .name {
+        grid-area: name;
+        align-self: end;
         overflow: hidden;
         font-weight: var(--yvz-weight-medium);
         text-overflow: ellipsis;
         white-space: nowrap;
       }
 
+      .head[data-no-status] .name {
+        align-self: center;
+      }
+
       .status {
+        grid-area: status;
+        align-self: start;
         overflow: hidden;
         color: var(--yvz-text-muted);
         font-variant-numeric: tabular-nums;
@@ -466,37 +517,82 @@ export class YvzLightCard extends YvzCard<LightCardConfig> {
         }
       }
 
+      /* Narrow: the badge and the status share the top row and the name gets the full width underneath, so
+         neither is cut. A compact card needs more room for its row, so it stacks sooner. */
+      @container (max-width: 219px) {
+        ha-card {
+          padding: var(--yvz-space-3);
+        }
+
+        yvz-icon-badge {
+          --yvz-badge-size: 34px;
+          --yvz-badge-icon: 20px;
+        }
+
+        yvz-segmented {
+          --yvz-segmented-hint-display: none;
+        }
+
+        ${narrowHead}
+      }
+
+      @container (max-width: 279px) {
+        ha-card.compact .head {
+          ${narrowHeadBody}
+        }
+
+        ha-card.compact .head[data-no-status] {
+          grid-template-areas:
+            "badge badge"
+            "name name";
+        }
+
+        ha-card.compact .name {
+          grid-area: name;
+          align-self: start;
+        }
+
+        ha-card.compact .status {
+          grid-area: status;
+          align-self: center;
+          justify-self: end;
+          text-align: end;
+        }
+      }
+
       /* one row: badge, name and the brightness slider */
-      ha-card.compact {
-        flex-direction: row;
-        align-items: center;
-        gap: var(--yvz-space-3);
-        padding: var(--yvz-space-3);
-      }
+      @container (min-width: 280px) {
+        ha-card.compact {
+          flex-direction: row;
+          align-items: center;
+          gap: var(--yvz-space-3);
+          padding: var(--yvz-space-3);
+        }
 
-      ha-card.compact .head {
-        flex: 1 1 0;
-        min-width: 0;
-      }
+        ha-card.compact .head {
+          flex: 1 1 0;
+          min-width: 0;
+        }
 
-      /* the slider takes a share of the row only while it is open; closed it gives its space (and the gap) back */
-      ha-card.compact .collapse {
-        flex: 0 1 0;
-        min-width: 0;
-        margin: 0 0 0 calc(-1 * var(--yvz-space-3));
-        grid-template-rows: 1fr;
-        grid-template-columns: 0fr;
-        transition:
-          flex-basis var(--yvz-duration-slow) var(--yvz-ease),
-          margin var(--yvz-duration-slow) var(--yvz-ease),
-          opacity var(--yvz-duration-base) var(--yvz-ease);
-      }
+        /* the slider takes a share of the row only while it is open; closed it gives its space (and the gap) back */
+        ha-card.compact .collapse {
+          flex: 0 1 0;
+          min-width: 0;
+          margin: 0 0 0 calc(-1 * var(--yvz-space-3));
+          grid-template-rows: 1fr;
+          grid-template-columns: 0fr;
+          transition:
+            flex-basis var(--yvz-duration-slow) var(--yvz-ease),
+            margin var(--yvz-duration-slow) var(--yvz-ease),
+            opacity var(--yvz-duration-base) var(--yvz-ease);
+        }
 
-      ha-card.compact .collapse[data-open] {
-        flex-basis: 38%;
-        min-width: 96px;
-        margin: 0;
-        grid-template-columns: 1fr;
+        ha-card.compact .collapse[data-open] {
+          flex-basis: 38%;
+          min-width: 96px;
+          margin: 0;
+          grid-template-columns: 1fr;
+        }
       }
 
       .body {

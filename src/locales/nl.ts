@@ -530,6 +530,7 @@ const nl: Dictionary = {
   "lightscene.field.name": "Naam",
   "lightscene.field.columns": "Kolommen (leeg = automatisch)",
   "lightscene.field.scenes": "Scènes",
+  "light.field.show_status": "Toon de status onder de naam",
 };
 
 export default nl;

@@ -2,6 +2,18 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.11.3 — 2026-10-28
+
+### Fixed
+
+- Light card on narrow cards (about 160 to 220 px): the name and the status no longer wrap or get cut to "…" for normal names. Below 220 px wide the badge and the status share the top row and the name has the full width underneath. A compact card does the same below 280 px and keeps its single row (icon, name and status, slider) from 280 px up. This follows the card's own width, not the screen's, so it also works in narrow sections. The toggle-only and brightness-only variants follow the same rule.
+- Light card: the favourite colours are all shown, wrapping onto a second or third row on a narrow card, instead of the last ones being cut off. The temperature / colour switch drops its colour strips on a narrow card and shortens its labels with "…" before it overflows.
+
+### Added
+
+- Light card: `show_status: false` leaves the state ("On · 60%") out of the header. Screen readers still hear it.
+- The Light card scene in the playground has 160, 220 and 280 px width states, and the width slider goes down to 140 px.
+
 ## 0.11.2 — 2026-10-28
 
 ### Fixed

@@ -19,8 +19,8 @@ export class YvzIconBadge extends LitElement {
         flex: none;
         align-items: center;
         justify-content: center;
-        width: var(--_size);
-        height: var(--_size);
+        width: var(--yvz-badge-size, var(--_size));
+        height: var(--yvz-badge-size, var(--_size));
         border-radius: 50%;
         background: var(--yvz-state-soft, var(--yvz-accent-soft));
         color: var(--yvz-state, var(--yvz-accent));
@@ -40,7 +40,7 @@ export class YvzIconBadge extends LitElement {
       }
 
       ha-icon {
-        --mdc-icon-size: var(--_icon);
+        --mdc-icon-size: var(--yvz-badge-icon, var(--_icon));
       }
     `,
   ];

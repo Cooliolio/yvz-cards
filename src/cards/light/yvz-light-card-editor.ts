@@ -23,6 +23,7 @@ export class YvzLightCardEditor extends YvzCardEditor<LightCardConfig> {
         },
       },
       { name: "compact", selector: { boolean: {} } },
+      { name: "show_status", selector: { boolean: {} } },
       {
         type: "expandable",
         name: "advanced",

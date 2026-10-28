@@ -293,6 +293,7 @@ controls: auto # auto | toggle | brightness | color
 | `name`, `icon` | the light's | |
 | `controls` | `auto` | The most to show. A light that can't do it shows what it can. |
 | `compact` | `false` | One row: icon, name and a brightness slider. Colour is one hold away, in more-info. |
+| `show_status` | `true` | The state ("On · 60%") under the name. |
 | `effects` | all the light has | Only these effects, in this order. |
 | `tap_action` | `toggle` | |
 | `hold_action` | `more-info` | |

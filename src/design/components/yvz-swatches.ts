@@ -1,5 +1,5 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
+import { customElement, property } from "lit/decorators.js";
 import { designStyles } from "../styles";
 
 export interface Swatch {
@@ -9,32 +9,28 @@ export interface Swatch {
   active?: boolean;
 }
 
-const MIN_SIZE = 32;
+const MIN_SIZE = 28;
 const GAP = 8;
 
-// A row of colour buttons. As many as fit in one row are shown, growing to share the width.
+// Colour buttons in a grid: all of them are shown, as many to a row as fit, and they wrap onto the next row
+// instead of being cut.
 // Tapping one emits yvz-select with its index in the full list.
 @customElement("yvz-swatches")
 export class YvzSwatches extends LitElement {
   @property({ attribute: false }) swatches: Swatch[] = [];
   @property({ type: Boolean, reflect: true }) disabled = false;
-  @state() private fit = 0;
-
-  private observer?: ResizeObserver;
-
   static override styles = [
     designStyles,
     css`
       :host {
-        display: flex;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(${MIN_SIZE}px, 1fr));
         gap: ${GAP}px;
         min-width: 0;
-        min-height: ${MIN_SIZE}px;
       }
 
       button {
-        flex: 1 1 ${MIN_SIZE}px;
-        min-width: ${MIN_SIZE}px;
+        min-width: 0;
         height: ${MIN_SIZE}px;
         padding: 0;
         border: 0;
@@ -66,30 +62,8 @@ export class YvzSwatches extends LitElement {
     `,
   ];
 
-  override connectedCallback(): void {
-    super.connectedCallback();
-    this.observer = new ResizeObserver(() => this.measure());
-    this.observer.observe(this);
-  }
-
-  override disconnectedCallback(): void {
-    super.disconnectedCallback();
-    this.observer?.disconnect();
-  }
-
-  private measure(): void {
-    const fit = Math.max(0, Math.floor((this.clientWidth + GAP) / (MIN_SIZE + GAP)));
-    if (fit !== this.fit) this.fit = fit;
-  }
-
-  protected override firstUpdated(): void {
-    this.measure();
-  }
-
   protected override render() {
-    // Before the first measurement everything shows, so nothing flashes in.
-    const shown = this.fit > 0 ? this.swatches.slice(0, this.fit) : this.swatches;
-    return html`${shown.map(
+    return html`${this.swatches.map(
       (s, i) => html`<button
         type="button"
         style="--_color: ${s.color}"

@@ -528,6 +528,7 @@ const en = {
   "lightscene.field.name": "Name",
   "lightscene.field.columns": "Columns (empty = automatic)",
   "lightscene.field.scenes": "Scenes",
+  "light.field.show_status": "Show the state under the name",
 };
 
 export type Dictionary = Record<keyof typeof en, string>;

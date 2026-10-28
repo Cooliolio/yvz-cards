@@ -282,3 +282,49 @@ describe("a slider keeps its value until the light reports it", () => {
     expect((card as unknown as { holds: Map<string, unknown> }).holds.size).toBe(0);
   });
 });
+
+describe("narrow cards", () => {
+  const css = () => ((customElements.get("yvz-light-card") as unknown as { styles: Array<{ cssText: string }> }).styles).map((s) => s.cssText).join("\n");
+
+  it("lays out by the card's own width: stacked header below 220 px, compact row from 280 px", () => {
+    expect(css()).toContain("container-type: inline-size");
+    expect(css()).toMatch(/@container \(max-width: 219px\)/);
+    expect(css()).toMatch(/@container \(max-width: 279px\)/);
+    expect(css()).toMatch(/@container \(min-width: 280px\)/);
+  });
+
+  it("puts the name and the status straight in the header, so the layout can order them", async () => {
+    for (const config of [{}, { controls: "toggle" }, { controls: "brightness" }, { compact: true }]) {
+      document.body.replaceChildren();
+      const { card } = make(colorLight, config);
+      await card.updateComplete;
+      const head = root(card).querySelector(".head")!;
+      expect(head.querySelector(":scope > .name")).not.toBeNull();
+      expect(head.querySelector(":scope > .status")).not.toBeNull();
+      expect(head.querySelector(":scope > yvz-icon-badge")).not.toBeNull();
+    }
+  });
+
+  it("show_status: false leaves the state out of the header but keeps it for screen readers", async () => {
+    const { card } = make(colorLight, { show_status: false });
+    await card.updateComplete;
+    const head = root(card).querySelector(".head") as HTMLElement;
+    expect(head.querySelector(".status")).toBeNull();
+    expect(head.hasAttribute("data-no-status")).toBe(true);
+    expect(head.getAttribute("aria-label")).toBe("Test, On · 50%");
+  });
+
+  it("shows the status by default", async () => {
+    const { card } = make(colorLight);
+    await card.updateComplete;
+    expect(root(card).querySelector(".head")!.hasAttribute("data-no-status")).toBe(false);
+  });
+
+  it("keeps every favourite in the DOM instead of cutting them to fit", async () => {
+    const { card } = make(colorLight);
+    await card.updateComplete;
+    const swatches = root(card).querySelector("yvz-swatches")!;
+    await (swatches as unknown as { updateComplete: Promise<boolean> }).updateComplete;
+    expect(swatches.shadowRoot!.querySelectorAll("button")).toHaveLength(8);
+  });
+});

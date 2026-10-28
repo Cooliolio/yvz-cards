@@ -870,6 +870,11 @@ const lightCard: Scene = {
   name: "Light card",
   tag: "yvz-light-card",
   width: 360,
+  presets: [
+    { name: "160 px wide", width: 160 },
+    { name: "220 px wide", width: 220 },
+    { name: "280 px wide", width: 280 },
+  ],
   config: { type: "custom:yvz-light-card", entity: "light.living_room" },
   // In order: each kind of light on auto, then the same lights held back or shown compact.
   extra: [

@@ -72,7 +72,7 @@ export class YvzSegmented extends LitElement {
         gap: var(--yvz-space-1);
         min-width: 0;
         height: var(--yvz-segmented-height, 40px);
-        padding: 0 var(--yvz-space-3);
+        padding: 0 var(--yvz-segmented-padding, var(--yvz-space-3));
         border: 0;
         border-radius: calc(var(--yvz-radius-md) - 4px);
         background: none;
@@ -94,6 +94,7 @@ export class YvzSegmented extends LitElement {
       }
 
       .hint {
+        display: var(--yvz-segmented-hint-display, block);
         flex: none;
         width: 20px;
         height: 8px;
@@ -108,6 +109,13 @@ export class YvzSegmented extends LitElement {
 
       button:focus-visible {
         outline-offset: -2px;
+      }
+
+      .label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       ha-icon {
@@ -139,7 +147,7 @@ export class YvzSegmented extends LitElement {
             ?disabled=${this.disabled}
             @click=${() => this.pick(o.value)}
           >
-            ${o.hint ? html`<i class="hint" style="background: ${o.hint}"></i>` : o.icon ? html`<ha-icon .icon=${o.icon}></ha-icon>` : ""}${o.label}
+            ${o.hint ? html`<i class="hint" style="background: ${o.hint}"></i>` : o.icon ? html`<ha-icon .icon=${o.icon}></ha-icon>` : ""}<span class="label">${o.label}</span>
           </button>`,
         )}
       </div>

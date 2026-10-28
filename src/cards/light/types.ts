@@ -10,6 +10,8 @@ export interface LightCardConfig extends LovelaceCardConfig {
   icon?: string;
   // Default: as much as the light supports. A light that can't do what is asked shows what it can.
   controls?: LightControls | "auto";
+  // The state under the name ("On · 60%"). Default: shown.
+  show_status?: boolean;
   // One row instead of a block: icon, name and a brightness slider. Colour stays one hold away, in more-info.
   compact?: boolean;
   // Only these effects, in this order. Default: all the light has.

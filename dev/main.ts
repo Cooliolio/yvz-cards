@@ -215,7 +215,7 @@ function update(): void {
         <div class="field">Language ${segmented(["en", "nl", "tr"], language, (l) => { language = l; persist(); update(); })}</div>
         <div class="field">Theme ${segmented(["dark", "light"], theme, (t) => { theme = t; persist(); update(); })}</div>
         <label>Width: ${width}px
-          <input type="range" min="260" max="1400" step="10" .value=${live(String(width))}
+          <input type="range" min="140" max="1400" step="10" .value=${live(String(width))}
             @input=${(e: Event) => { width = Number((e.target as HTMLInputElement).value); persist(); update(); }} />
         </label>
         <label>Panel height: ${height ? `${height}px` : "auto"}
