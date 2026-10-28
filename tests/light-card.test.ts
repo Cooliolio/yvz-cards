@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "../src/cards/light/yvz-light-card";
 import type { YvzLightCard } from "../src/cards/light/yvz-light-card";
 import type { HassEntity, HomeAssistant } from "../src/shared/types";
@@ -167,5 +167,118 @@ describe("hold on a desktop", () => {
     head.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
     head.click();
     expect(callService).toHaveBeenCalledWith("homeassistant", "toggle", { entity_id: "light.test" });
+  });
+});
+
+describe("a slider keeps its value until the light reports it", () => {
+  const hsLight = (hs: [number, number]) =>
+    light({ supported_color_modes: ["color_temp", "hs"], color_mode: "hs", brightness: 128, hs_color: hs, rgb_color: [255, 0, 0], min_color_temp_kelvin: 2000, max_color_temp_kelvin: 6500 });
+  const reported = (card: YvzLightSceneLike, entity: HassEntity) => {
+    card.hass = { ...card.hass!, states: { "light.test": entity } } as HomeAssistant;
+  };
+  type YvzLightSceneLike = YvzLightCard;
+  const brightnessSlider = (card: YvzLightCard) => root(card).querySelector("yvz-slider") as HTMLElement & { value: number };
+  const letGo = (slider: HTMLElement, value: number) => slider.dispatchEvent(new CustomEvent("yvz-change", { detail: { value } }));
+  const settle = async (card: YvzLightCard) => {
+    await vi.advanceTimersByTimeAsync(0);
+    await card.updateComplete;
+  };
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("does not show the old value while the light is slow to report", async () => {
+    const { card } = make(colorLight);
+    await card.updateComplete;
+    letGo(brightnessSlider(card), 70);
+    await settle(card);
+    await vi.advanceTimersByTimeAsync(500);
+    await card.updateComplete;
+    expect(brightnessSlider(card).value).toBe(70);
+    expect(root(card).querySelector(".status")?.textContent).toBe("On · 70%");
+
+    reported(card, { ...colorLight, attributes: { ...colorLight.attributes, brightness: 179 } });
+    await card.updateComplete;
+    expect((card as unknown as { holds: Map<string, unknown> }).holds.size).toBe(0);
+    expect(brightnessSlider(card).value).toBe(70);
+  });
+
+  it("keeps waiting when the light still reports the old value", async () => {
+    const { card } = make(colorLight);
+    await card.updateComplete;
+    letGo(brightnessSlider(card), 70);
+    await settle(card);
+    reported(card, { ...colorLight, attributes: { ...colorLight.attributes } });
+    await card.updateComplete;
+    expect(brightnessSlider(card).value).toBe(70);
+  });
+
+  it("gives up after 3 seconds if the light never confirms", async () => {
+    const { card } = make(colorLight);
+    await card.updateComplete;
+    letGo(brightnessSlider(card), 70);
+    await settle(card);
+    await vi.advanceTimersByTimeAsync(2900);
+    await card.updateComplete;
+    expect(brightnessSlider(card).value).toBe(70);
+    await vi.advanceTimersByTimeAsync(200);
+    await card.updateComplete;
+    expect(brightnessSlider(card).value).toBe(50);
+  });
+
+  it("shows the real state at once when the call fails", async () => {
+    const { card, callService } = make(colorLight);
+    callService.mockRejectedValue(new Error("nope"));
+    await card.updateComplete;
+    letGo(brightnessSlider(card), 70);
+    await settle(card);
+    expect(brightnessSlider(card).value).toBe(50);
+    expect(root(card).querySelector(".status")?.textContent).toBe("On · 50%");
+  });
+
+  it("a new drag during the wait takes over and is not cleared by the old timer", async () => {
+    const { card } = make(colorLight);
+    await card.updateComplete;
+    const slider = brightnessSlider(card);
+    letGo(slider, 70);
+    await settle(card);
+    await vi.advanceTimersByTimeAsync(1000);
+    slider.dispatchEvent(new CustomEvent("yvz-input", { detail: { value: 85 } }));
+    await vi.advanceTimersByTimeAsync(3500);
+    await card.updateComplete;
+    expect(brightnessSlider(card).value).toBe(85);
+  });
+
+  it("confirms colour temperature within 100 K, and not before the light has changed", async () => {
+    const { card } = make(colorLight, { controls: "color" });
+    await card.updateComplete;
+    const sliders = () => [...root(card).querySelectorAll("yvz-slider")] as Array<HTMLElement & { value: number }>;
+    letGo(sliders()[1], 4000);
+    await settle(card);
+    expect(sliders()[1].value).toBe(4000);
+    // an old reading near the target (3000 is not) must not count, a changed one within tolerance does
+    reported(card, { ...colorLight, attributes: { ...colorLight.attributes, color_temp_kelvin: 3500 } });
+    await card.updateComplete;
+    expect((card as unknown as { holds: Map<string, unknown> }).holds.size).toBe(1);
+    reported(card, { ...colorLight, attributes: { ...colorLight.attributes, color_temp_kelvin: 3950 } });
+    await card.updateComplete;
+    expect((card as unknown as { holds: Map<string, unknown> }).holds.size).toBe(0);
+  });
+
+  it("holds hue and saturation together", async () => {
+    const { card, callService } = make(hsLight([10, 50]), { controls: "color" });
+    await card.updateComplete;
+    const sliders = () => [...root(card).querySelectorAll("yvz-slider")] as Array<HTMLElement & { value: number }>;
+    letGo(sliders()[1], 200);
+    await settle(card);
+    expect(callService).toHaveBeenCalledWith("light", "turn_on", { entity_id: "light.test", hs_color: [200, 50] });
+    expect(sliders()[1].value).toBe(200);
+    expect(sliders()[2].value).toBe(50);
+    reported(card, hsLight([199, 50]));
+    await card.updateComplete;
+    expect((card as unknown as { holds: Map<string, unknown> }).holds.size).toBe(1);
+    reported(card, hsLight([199, 49]));
+    await card.updateComplete;
+    expect((card as unknown as { holds: Map<string, unknown> }).holds.size).toBe(0);
   });
 });

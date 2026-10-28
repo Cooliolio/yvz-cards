@@ -29,12 +29,25 @@ import {
 import type { LightCardConfig, LightColor, LightControls } from "./types";
 
 type View = "temperature" | "color";
+type HoldKey = "brightness" | "kelvin" | "hue" | "saturation";
+
+// A dragged value is held after release until the light reports it, and no longer than this.
+const HOLD_MS = 3000;
+// How close the reported value has to be to the committed one: a light rounds, and converts between colour spaces.
+const TOLERANCE: Record<HoldKey, number> = { brightness: 2, kelvin: 100, hue: 3, saturation: 3 };
+
+interface Hold {
+  value: number;
+  // What the light reported when the value was sent, so an old reading that happens to be close doesn't confirm it.
+  before?: number;
+  timer: ReturnType<typeof setTimeout>;
+}
 
 const TIERS: LightControls[] = ["toggle", "brightness", "color"];
 
 @customElement("yvz-light-card")
 export class YvzLightCard extends YvzCard<LightCardConfig> {
-  // What the user is dragging, shown until the light reports it back.
+  // What the user is dragging, and after letting go still shown until the light reports it back (see holds).
   @state() private dragBrightness?: number;
   @state() private dragKelvin?: number;
   @state() private dragHue?: number;
@@ -43,6 +56,7 @@ export class YvzLightCard extends YvzCard<LightCardConfig> {
   @state() private favorites?: LightColor[];
 
   private favoritesFor?: string;
+  private holds = new Map<HoldKey, Hold>();
 
   static getConfigElement(): HTMLElement {
     return document.createElement("yvz-light-card-editor");
@@ -82,6 +96,7 @@ export class YvzLightCard extends YvzCard<LightCardConfig> {
 
   protected override willUpdate(changed: PropertyValues): void {
     if (changed.has("hass") || changed.has("config")) void this.loadFavorites();
+    if (changed.has("hass")) this.confirmHolds();
   }
 
   // The favourites set in the more-info dialog live in the entity registry; reading them needs admin rights,
@@ -103,15 +118,65 @@ export class YvzLightCard extends YvzCard<LightCardConfig> {
     }
   }
 
-  private call(data: Record<string, unknown>): Promise<unknown> | undefined {
+  private async call(data: Record<string, unknown>): Promise<boolean> {
     const entity_id = this.config?.entity;
-    if (!entity_id || !this.hass) return undefined;
-    return this.hass.callService("light", "turn_on", { entity_id, ...data }).catch(() => undefined);
+    if (!entity_id || !this.hass) return false;
+    try {
+      await this.hass.callService("light", "turn_on", { entity_id, ...data });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
-  private async commit(data: Record<string, unknown>): Promise<void> {
-    await this.call(data);
-    this.dragBrightness = this.dragKelvin = this.dragHue = this.dragSaturation = undefined;
+  private drag(key: HoldKey): number | undefined {
+    return { brightness: this.dragBrightness, kelvin: this.dragKelvin, hue: this.dragHue, saturation: this.dragSaturation }[key];
+  }
+
+  // A new drag takes over from whatever was being held for that slider.
+  private setDrag(key: HoldKey, value: number | undefined): void {
+    const hold = this.holds.get(key);
+    if (hold) clearTimeout(hold.timer);
+    this.holds.delete(key);
+    if (key === "brightness") this.dragBrightness = value;
+    else if (key === "kelvin") this.dragKelvin = value;
+    else if (key === "hue") this.dragHue = value;
+    else this.dragSaturation = value;
+  }
+
+  // What the light reports for this slider right now.
+  private reading(key: HoldKey): number | undefined {
+    const a = this.light?.attributes ?? {};
+    const hs = Array.isArray(a.hs_color) ? (a.hs_color as number[]) : undefined;
+    const value = { brightness: toPercent(a.brightness), kelvin: Number(a.color_temp_kelvin) || undefined, hue: hs?.[0], saturation: hs?.[1] }[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  }
+
+  // The service call is answered as soon as Home Assistant has it, but the light reports its new state only once
+  // the device does, which can take seconds. Until then the slider keeps the value it was let go on.
+  private async commit(data: Record<string, unknown>, held: Partial<Record<HoldKey, number>> = {}): Promise<void> {
+    const keys = Object.keys(held) as HoldKey[];
+    // Anything else (a favourite, an effect) replaces whatever the sliders were showing.
+    if (!keys.length) for (const key of ["brightness", "kelvin", "hue", "saturation"] as HoldKey[]) this.setDrag(key, undefined);
+    for (const key of keys) {
+      this.setDrag(key, held[key]);
+      this.holds.set(key, { value: held[key]!, before: this.reading(key), timer: setTimeout(() => this.setDrag(key, undefined), HOLD_MS) });
+    }
+    if (!(await this.call(data))) for (const key of keys) this.setDrag(key, undefined);
+  }
+
+  // The light has reported what was sent when it is close to it and is no longer what it was.
+  private confirmHolds(): void {
+    for (const [key, hold] of this.holds) {
+      const now = this.reading(key);
+      if (now !== undefined && now !== hold.before && Math.abs(now - hold.value) <= TOLERANCE[key]) this.setDrag(key, undefined);
+    }
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    for (const hold of this.holds.values()) clearTimeout(hold.timer);
+    this.holds.clear();
   }
 
   private effectiveView(): View {
@@ -195,10 +260,9 @@ export class YvzLightCard extends YvzCard<LightCardConfig> {
           .value=${percent}
           .min=${1}
           .max=${100}
-          @yvz-input=${(e: CustomEvent<{ value: number }>) => (this.dragBrightness = e.detail.value)}
+          @yvz-input=${(e: CustomEvent<{ value: number }>) => this.setDrag("brightness", e.detail.value)}
           @yvz-change=${(e: CustomEvent<{ value: number }>) => {
-            this.dragBrightness = e.detail.value;
-            void this.commit({ brightness_pct: e.detail.value });
+            void this.commit({ brightness_pct: e.detail.value }, { brightness: e.detail.value });
           }}
         ></yvz-slider>`
       : nothing;
@@ -235,10 +299,9 @@ export class YvzLightCard extends YvzCard<LightCardConfig> {
       .step=${50}
       .gradient=${temperatureGradient(min, max)}
       .thumb=${`rgb(${temperatureToRgb(kelvin).join(", ")})`}
-      @yvz-input=${(e: CustomEvent<{ value: number }>) => (this.dragKelvin = e.detail.value)}
+      @yvz-input=${(e: CustomEvent<{ value: number }>) => this.setDrag("kelvin", e.detail.value)}
       @yvz-change=${(e: CustomEvent<{ value: number }>) => {
-        this.dragKelvin = e.detail.value;
-        void this.commit({ color_temp_kelvin: e.detail.value });
+        void this.commit({ color_temp_kelvin: e.detail.value }, { kelvin: e.detail.value });
       }}
     ></yvz-slider>`;
   }
@@ -248,7 +311,11 @@ export class YvzLightCard extends YvzCard<LightCardConfig> {
     const hue = this.dragHue ?? hs[0];
     const saturation = this.dragSaturation ?? hs[1];
     const thumb = `rgb(${hsToRgb(hue, saturation).join(", ")})`;
-    const send = () => void this.commit({ hs_color: [this.dragHue ?? hs[0], this.dragSaturation ?? hs[1]] });
+    // hue and saturation travel together, so both are held
+    const send = (changed: HoldKey, value: number) => {
+      const next = { hue: this.drag("hue") ?? hs[0], saturation: this.drag("saturation") ?? hs[1], [changed]: value };
+      void this.commit({ hs_color: [next.hue, next.saturation] }, next);
+    };
     return html`<yvz-slider
         .label=${this.t("light.hue")}
         .value=${hue}
@@ -256,10 +323,9 @@ export class YvzLightCard extends YvzCard<LightCardConfig> {
         .max=${360}
         .gradient=${HUE_GRADIENT}
         .thumb=${thumb}
-        @yvz-input=${(e: CustomEvent<{ value: number }>) => (this.dragHue = e.detail.value)}
+        @yvz-input=${(e: CustomEvent<{ value: number }>) => this.setDrag("hue", e.detail.value)}
         @yvz-change=${(e: CustomEvent<{ value: number }>) => {
-          this.dragHue = e.detail.value;
-          send();
+          send("hue", e.detail.value);
         }}
       ></yvz-slider>
       <yvz-slider
@@ -269,10 +335,9 @@ export class YvzLightCard extends YvzCard<LightCardConfig> {
         .max=${100}
         .gradient=${saturationGradient(hue)}
         .thumb=${thumb}
-        @yvz-input=${(e: CustomEvent<{ value: number }>) => (this.dragSaturation = e.detail.value)}
+        @yvz-input=${(e: CustomEvent<{ value: number }>) => this.setDrag("saturation", e.detail.value)}
         @yvz-change=${(e: CustomEvent<{ value: number }>) => {
-          this.dragSaturation = e.detail.value;
-          send();
+          send("saturation", e.detail.value);
         }}
       ></yvz-slider>`;
   }

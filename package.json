@@ -1,6 +1,6 @@
 {
   "name": "yvz-cards",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "private": true,
   "description": "Custom Home Assistant dashboard cards",
   "type": "module",

@@ -2,6 +2,12 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.11.1 — 2026-10-28
+
+### Fixed
+
+- Light card: after you let go of a slider (brightness, colour temperature, hue, saturation) it jumped back to the old value and then to the new one, because the light only reports its new state once the device does, which can take a few seconds. The slider, the tint and the status ("On · 15%") now keep the value you set until the light reports it (brightness within 2 %, temperature within 100 K, hue and saturation within 3), or for 3 seconds at most. Starting a new drag takes over, and a failed call shows the real state at once.
+
 ## 0.11.0 — 2026-10-28
 
 ### Added
