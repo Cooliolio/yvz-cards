@@ -14,8 +14,24 @@ export interface Control {
   step?: number;
 }
 
+// A named state of a scene: the same card with some entity values or settings changed.
+export interface Preset {
+  name: string;
+  // Control values that differ from the scene's defaults.
+  values?: Record<string, ControlValue>;
+  // Replace the scene's card config, extra cards, width or panel height for this state.
+  config?: Record<string, unknown>;
+  extra?: Record<string, unknown>[];
+  width?: number;
+  height?: number;
+}
+
 export interface Scene {
   name: string;
+  // Scenes are listed under their group.
+  group?: "Cards" | "Design";
+  // The states the scene can be switched between, besides its defaults.
+  presets?: Preset[];
   tag: string;
   width?: number;
   // A fixed parent height, like a panel view.
@@ -175,22 +191,15 @@ const stove: Scene = {
   },
 };
 
-// The same scene with one case switched on, so each state of the design can be opened directly.
-const stoveCase = (name: string, patch: Record<string, ControlValue>): Scene => ({
-  ...stove,
-  name: `Stove · ${name}`,
-  controls: stove.controls.map((c) => (c.key in patch ? { ...c, value: patch[c.key] } : c)),
-});
-
-const stoveCases: Scene[] = [
-  stoveCase("off, last run", { status: "Uit", minutes: 25, power: 0 }),
-  stoveCase("igniting", { status: "Ontsteken", minutes: 6, power: 310 }),
-  stoveCase("burning, slow ignition", { status: "Brandt", minutes: 38, ignitionMin: 17 }),
-  stoveCase("cooling down", { status: "Uitdoven", minutes: 12, power: 18 }),
-  stoveCase("failed ignition", { status: "Storing", minutes: 4, ignitionMin: 15, power: 0 }),
-  stoveCase("low pellets", { pellets: 3 }),
-  stoveCase("wrong state", { status: "Uit", minutes: 12, power: 410 }),
-  stoveCase("history starts mid-run", { noRunHistory: true }),
+stove.presets = [
+  { name: "Off, last run", values: { status: "Uit", minutes: 25, power: 0 } },
+  { name: "Igniting", values: { status: "Ontsteken", minutes: 6, power: 310 } },
+  { name: "Slow ignition", values: { status: "Brandt", minutes: 38, ignitionMin: 17 } },
+  { name: "Cooling down", values: { status: "Uitdoven", minutes: 12, power: 18 } },
+  { name: "Failed ignition", values: { status: "Storing", minutes: 4, ignitionMin: 15, power: 0 } },
+  { name: "Low pellets", values: { pellets: 3 } },
+  { name: "Wrong state", values: { status: "Uit", minutes: 12, power: 410 } },
+  { name: "History starts mid-run", values: { noRunHistory: true } },
 ];
 
 const gaugeControl = (key: string, label: string, value: number, min = 0, max = 100, step = 1): Control => ({
@@ -205,6 +214,7 @@ const gaugeControl = (key: string, label: string, value: number, min = 0, max = 
 
 const gauges: Scene = {
   name: "Gauges",
+  group: "Design",
   tag: "yvz-gauge-gallery",
   width: 560,
   config: { type: "custom:yvz-gauge-gallery" },
@@ -612,24 +622,16 @@ const heatingStats: Scene = {
   },
 };
 
-// The same scene with one case switched on, so each can be opened directly.
-const statsCase = (name: string, patch: Record<string, ControlValue>, extra: Partial<Scene> = {}): Scene => ({
-  ...heatingStats,
-  name: `Heating stats · ${name}`,
-  ...extra,
-  controls: heatingStats.controls.map((c) => (c.key in patch ? { ...c, value: patch[c.key] } : c)),
-});
-
-const heatingStatsCases: Scene[] = [
-  statsCase("wide panel", {}, { width: 1100, height: 780, extra: [] }),
-  statsCase("frost target and spike", { frost: true, spike: true }),
-  statsCase("dip and rebound", { dip: true }),
-  statsCase("one active day", { oneDay: true }),
-  statsCase(
-    "new install",
-    { dataDays: 2 },
-    { config: { type: "custom:yvz-heating-stats-card", name: "Heating stats (new install)", period: "month" } },
-  ),
+heatingStats.presets = [
+  { name: "Wide panel", width: 1100, height: 780, extra: [] },
+  { name: "Frost target and spike", values: { frost: true, spike: true } },
+  { name: "Dip and rebound", values: { dip: true } },
+  { name: "One active day", values: { oneDay: true } },
+  {
+    name: "New install",
+    values: { dataDays: 2 },
+    config: { type: "custom:yvz-heating-stats-card", name: "Heating stats (new install)", period: "month" },
+  },
 ];
 
 const TESLA_DEVICE = "tesla-device";
@@ -860,4 +862,115 @@ const gaugeCard: Scene = {
   },
 };
 
-export const scenes: Scene[] = [host, heating, heatingStats, ...heatingStatsCases, tesla, gaugeCard, stove, ...stoveCases, gauges];
+// A stand-in for the camera: a dark bench with a build plate.
+const PRINTER_PICTURE = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b4048"/><stop offset="1" stop-color="#16181c"/></linearGradient></defs><rect width="640" height="360" fill="url(#g)"/><rect x="170" y="240" width="300" height="14" rx="3" fill="#5b616b"/><path d="M200 240 L240 150 H400 L440 240 Z" fill="#c4543a" opacity=".85"/><rect x="300" y="60" width="40" height="70" rx="4" fill="#8b929c"/><rect x="312" y="130" width="16" height="24" fill="#5b616b"/></svg>',
+)}`;
+
+const PRINTER_STATES: Record<string, string> = {
+  off: "offline",
+  wait: "offline",
+  ready: "operational",
+  printing: "printing",
+  paused: "paused",
+  error: "error",
+};
+
+const printer: Scene = {
+  name: "Printer",
+  tag: "yvz-printer-card",
+  width: 440,
+  config: { type: "custom:yvz-printer-card", name: "Printer" },
+  controls: [
+    { key: "mode", label: "State", type: "select", value: "printing", options: Object.keys(PRINTER_STATES) },
+    gaugeControl("progress", "Progress (%)", 42),
+    gaugeControl("minutesLeft", "Minutes left", 78, 0, 600),
+    gaugeControl("elapsed", "Minutes since start (-1 = no sensor)", 82, -1, 600),
+    gaugeControl("finishedAgo", "Minutes since OctoPrint went ready", 20, 0, 300),
+    gaugeControl("hotend", "Hotend (°C)", 208, 0, 300),
+    gaugeControl("hotendTarget", "Hotend target (°C)", 210, 0, 300, 5),
+    gaugeControl("bed", "Bed (°C)", 59, 0, 120),
+    gaugeControl("bedTarget", "Bed target (°C)", 60, 0, 120, 5),
+    { key: "camera", label: "Camera picture", type: "checkbox", value: true },
+  ],
+  states(v) {
+    const n = (k: string) => Number(v[k]);
+    const mode = String(v.mode);
+    const list = [
+      entity("switch.grillplats_plug", mode === "off" ? "off" : "on"),
+      entity("sensor.octoprint_current_state", PRINTER_STATES[mode], {}, n("finishedAgo")),
+      ...(n("elapsed") >= 0
+        ? [entity("sensor.octoprint_start_time", new Date(Date.now() - n("elapsed") * 60_000).toISOString(), { device_class: "timestamp" })]
+        : []),
+      entity("binary_sensor.octoprint_printing", mode === "printing" ? "on" : "off"),
+      sensor("sensor.octoprint_job_percentage", n("progress"), "%"),
+      entity("sensor.octoprint_estimated_finish_time", new Date(Date.now() + n("minutesLeft") * 60_000).toISOString(), {
+        device_class: "timestamp",
+      }),
+      entity("sensor.octoprint_current_file", "benchy_0.2mm_PLA.gcode"),
+      sensor("sensor.octoprint_actual_tool0_temp", n("hotend"), "°C"),
+      entity("number.octoprint_extruder_temperature", String(n("hotendTarget")), { unit_of_measurement: "°C" }),
+      sensor("sensor.octoprint_actual_bed_temp", n("bed"), "°C"),
+      entity("number.octoprint_bed_temperature", String(n("bedTarget")), { unit_of_measurement: "°C" }),
+      entity("camera.octoprint_camera", "idle", v.camera ? { entity_picture: PRINTER_PICTURE } : {}),
+    ];
+    return Object.fromEntries(list.map((e) => [e.entity_id, e]));
+  },
+  service(domain, service, data, v): Record<string, ControlValue> | void {
+    if (domain === "script") {
+      if (service === "printer_power_on") return { mode: "ready" };
+      if (service === "printer_power_off_safe") return { mode: "off" };
+      if (service === "printer_preheat_pla") return { hotendTarget: 200, bedTarget: 60 };
+      if (service === "printer_preheat_petg") return { hotendTarget: 240, bedTarget: 80 };
+      if (service === "printer_cooldown") return { hotendTarget: 0, bedTarget: 0 };
+      if (service === "printer_temp_adjust") {
+        const hot = data.entity === "number.octoprint_extruder_temperature";
+        const key = hot ? "hotendTarget" : "bedTarget";
+        return { [key]: Math.max(0, Number(v[key]) + Number(data.delta)) };
+      }
+    }
+    if (domain === "number" && service === "set_value") {
+      const key = data.entity_id === "number.octoprint_extruder_temperature" ? "hotendTarget" : "bedTarget";
+      return { [key]: Number(data.value) };
+    }
+    if (domain === "button") {
+      const id = String(data.entity_id);
+      if (id.endsWith("pause_job")) return { mode: "paused" };
+      if (id.endsWith("resume_job")) return { mode: "printing" };
+      if (id.endsWith("stop_job")) return { mode: "ready" };
+    }
+  },
+};
+
+printer.presets = [
+  { name: "Off", values: { mode: "off" } },
+  { name: "Waiting for OctoPrint", values: { mode: "wait" } },
+  { name: "Ready", values: { mode: "ready", hotend: 24, hotendTarget: 0, bed: 22, bedTarget: 0 } },
+  { name: "Paused", values: { mode: "paused" } },
+  { name: "Error", values: { mode: "error", hotend: 31, hotendTarget: 0, bed: 28, bedTarget: 0 } },
+  { name: "No camera picture", values: { camera: false } },
+  {
+    name: "Finished",
+    values: { mode: "ready", progress: 100, hotend: 38, hotendTarget: 0, bed: 52, bedTarget: 0, elapsed: 190, finishedAgo: 20 },
+  },
+  { name: "Hot bed, nothing printing", values: { mode: "ready", progress: 0, hotend: 24, hotendTarget: 0, bed: 62, bedTarget: 0, elapsed: -1 } },
+  {
+    name: "Heating up",
+    values: { mode: "ready", progress: 0, hotend: 140, hotendTarget: 210, bed: 48, bedTarget: 60, elapsed: -1 },
+  },
+  {
+    name: "Custom presets",
+    values: { mode: "ready", progress: 0, hotend: 24, hotendTarget: 0, bed: 22, bedTarget: 0, elapsed: -1 },
+    config: {
+      type: "custom:yvz-printer-card",
+      name: "Printer",
+      presets: [
+        { name: "PLA", hotend: 205, bed: 60 },
+        { name: "ABS", hotend: 250, bed: 100 },
+        { name: "TPU", hotend: 225, bed: 50, icon: "mdi:rubber-duck" },
+      ],
+    },
+  },
+];
+
+export const scenes: Scene[] = [host, heating, heatingStats, tesla, gaugeCard, stove, printer, gauges];

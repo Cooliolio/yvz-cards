@@ -39,5 +39,7 @@ import "./components/yvz-setting-row";
 import "./components/yvz-slider";
 import "./components/yvz-stat";
 import "./components/yvz-note";
+import "./components/yvz-camera";
+import "./components/yvz-number-field";
 import "./components/yvz-bars";
 import "./components/yvz-timeline";

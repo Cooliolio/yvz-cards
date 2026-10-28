@@ -2,6 +2,19 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.9.0 — 2026-10-28
+
+### Added
+
+- **Printer card** (`custom:yvz-printer-card`), rebuilt from the standalone printer card on the shared design system, with the same functions.
+  - Live camera with the progress on it, tap for the camera's more-info. The stream stops when the card leaves the page, restarts when the tab becomes visible and retries after a break.
+  - Off, waiting, ready, printing, paused and error. Ready has preheat PLA and PETG, cool down, hotend and bed − and + with a number field to type an exact temperature, and a confirmed power off after cooling. Printing has progress, file, time left, finish time, temperatures, Pause or Resume and a confirmed Stop. Powering on needs a second tap.
+  - How long a print has been running, a trend of the last hour for the hotend and bed, a warning while the bed is still hot, and a "Finished 14:32 · took 3 h 10 min" note after a print. Your own preheat presets (`presets`), each setting the temperatures or running a script.
+  - Works with the OctoPrint defaults without configuration. Visual editor, English, Dutch and Turkish (the labels used to be Dutch only), two columns from 640 px and panel fill.
+- Design components: `yvz-camera` and `yvz-number-field` (a number that turns into a small input when tapped).
+- Playground: a printer scene whose buttons change the fake state, with a placeholder camera picture.
+- Playground: a scene list instead of the dropdown, with the states of a scene (igniting, failed ignition, finished, wide panel and so on) as their own row of chips. The scene and state are remembered across reloads and in the address, and the arrow keys move through them.
+
 ## 0.8.0 — 2026-10-26
 
 ### Changed

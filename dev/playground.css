@@ -40,6 +40,79 @@ body {
   width: 100%;
 }
 
+nav {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 4px;
+  width: 200px;
+  padding: 16px 12px;
+  overflow-y: auto;
+  border-right: 1px solid var(--divider-color);
+  background: var(--card-background-color);
+}
+
+nav h1 {
+  margin: 0 8px 8px;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+nav h2 {
+  margin: 12px 8px 4px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--secondary-text-color);
+}
+
+nav ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+nav .scene {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--primary-text-color);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+nav .scene:hover {
+  background: var(--secondary-background-color);
+}
+
+nav .scene.on {
+  background: color-mix(in srgb, var(--primary-color) 18%, transparent);
+  color: var(--primary-color);
+  font-weight: 500;
+}
+
+nav .scene small {
+  color: var(--secondary-text-color);
+  font-size: 11px;
+}
+
+nav .keys {
+  margin: auto 8px 0;
+  padding-top: 16px;
+  color: var(--secondary-text-color);
+  font-size: 11px;
+}
+
 aside {
   display: flex;
   flex: none;
@@ -59,6 +132,38 @@ aside h2 {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--secondary-text-color);
+}
+
+aside .field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--secondary-text-color);
+}
+
+.seg {
+  display: flex;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--secondary-background-color);
+}
+
+.seg button {
+  flex: 1;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--secondary-text-color);
+  font: inherit;
+  cursor: pointer;
+}
+
+.seg button.on {
+  background: var(--card-background-color);
+  color: var(--primary-text-color);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
 }
 
 aside label {
@@ -103,6 +208,48 @@ main {
   align-items: center;
   gap: 24px;
   padding: 32px;
+}
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  width: 100%;
+  max-width: 900px;
+}
+
+.bar .title {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.states {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  padding: 5px 12px;
+  border: 1px solid var(--divider-color);
+  border-radius: 999px;
+  background: none;
+  color: var(--secondary-text-color);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chip:hover {
+  color: var(--primary-text-color);
+}
+
+.chip.on {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--primary-color) 18%, transparent);
+  color: var(--primary-color);
+  font-weight: 500;
 }
 
 .stage {

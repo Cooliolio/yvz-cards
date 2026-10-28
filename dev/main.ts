@@ -4,14 +4,35 @@ import "./ha-stubs";
 import "./gauge-gallery";
 import "../src/index";
 import type { HomeAssistant } from "../src/shared/types";
-import { scenes, type Control, type ControlValue, type Scene } from "./scenes";
+import { scenes, type Control, type ControlValue, type Preset, type Scene } from "./scenes";
 
 interface CardElement extends HTMLElement {
   setConfig(config: Record<string, unknown>): void;
   hass?: HomeAssistant;
 }
 
+const STORE_KEY = "yvz-playground";
+
+interface Saved {
+  scene?: string;
+  state?: string;
+  language?: string;
+  theme?: string;
+  width?: number;
+  height?: number;
+}
+
+function readSaved(): Saved {
+  try {
+    return JSON.parse(localStorage.getItem(STORE_KEY) ?? "{}") as Saved;
+  } catch {
+    return {};
+  }
+}
+
 let scene: Scene = scenes[0];
+let preset: Preset | undefined;
+let extras: Record<string, unknown>[] = [];
 let values: Record<string, ControlValue> = {};
 let language = "en";
 let theme = "dark";
@@ -21,17 +42,51 @@ let failServices = false;
 let configText = "";
 let configError = false;
 let cards: CardElement[] = [];
-let cardTag = "";
 const log: string[] = [];
 
-function resetScene(next: Scene): void {
+// Remembers where you were, in the address and in storage, so a reload (or a hot reload after an edit)
+// puts you back on the same scene and state.
+function persist(): void {
+  try {
+    localStorage.setItem(
+      STORE_KEY,
+      JSON.stringify({ scene: scene.name, state: preset?.name, language, theme, width, height } satisfies Saved),
+    );
+  } catch {
+    // Storage can be blocked; the address still remembers the scene.
+  }
+  const params = new URLSearchParams(location.search);
+  params.set("scene", scene.name);
+  if (preset) params.set("state", preset.name);
+  else params.delete("state");
+  history.replaceState(null, "", `?${params.toString()}`);
+}
+
+// Opens a scene in one of its states (or its defaults when no preset is given).
+function openScene(next: Scene, nextPreset?: Preset): void {
   scene = next;
-  width = next.width ?? 440;
-  height = next.height ?? 0;
-  values = Object.fromEntries(next.controls.map((c) => [c.key, c.value]));
-  configText = JSON.stringify(next.config, null, 2);
+  preset = nextPreset;
+  width = nextPreset?.width ?? next.width ?? 440;
+  height = nextPreset?.height ?? next.height ?? 0;
+  values = { ...Object.fromEntries(next.controls.map((c) => [c.key, c.value])), ...nextPreset?.values };
+  configText = JSON.stringify(nextPreset?.config ?? next.config, null, 2);
+  extras = nextPreset?.extra ?? next.extra ?? [];
   configError = false;
   cards = [];
+}
+
+// Moves through the scenes, or through the states of the current scene (the defaults come first).
+function step(kind: "scene" | "state", direction: 1 | -1): void {
+  if (kind === "scene") {
+    const next = scenes[(scenes.indexOf(scene) + direction + scenes.length) % scenes.length];
+    openScene(next);
+  } else {
+    const states: Array<Preset | undefined> = [undefined, ...(scene.presets ?? [])];
+    const at = states.indexOf(preset);
+    openScene(scene, states[(at + direction + states.length) % states.length]);
+  }
+  persist();
+  update();
 }
 
 function buildHass(): HomeAssistant {
@@ -72,14 +127,15 @@ function buildHass(): HomeAssistant {
 }
 
 function syncCard(stage: HTMLElement): void {
-  if (!cards.length || cardTag !== scene.tag) {
+  if (!cards.length) {
     stage.replaceChildren();
-    cards = [scene.tag, ...(scene.extra ?? []).map(() => scene.tag)].map((tag) => {
+    // Extra cards may be of another type than the main one, e.g. an old and a new version side by side.
+    const tags = [scene.tag, ...extras.map((c) => String(c.type ?? "").replace("custom:", "") || scene.tag)];
+    cards = tags.map((tag) => {
       const el = document.createElement(tag) as CardElement;
       stage.append(el);
       return el;
     });
-    cardTag = scene.tag;
     applyConfig();
   }
   const hass = buildHass();
@@ -94,7 +150,7 @@ function applyConfig(): void {
     configError = true;
   }
   // Variants shown under the main card, e.g. the compact layout.
-  (scene.extra ?? []).forEach((config, i) => cards[i + 1]?.setConfig(config));
+  extras.forEach((config, i) => cards[i + 1]?.setConfig(config));
 }
 
 function renderControl(c: Control) {
@@ -118,48 +174,71 @@ function renderControl(c: Control) {
     @change=${(e: Event) => set((e.target as HTMLInputElement).checked)} />${c.label}</label>`;
 }
 
+const GROUPS = ["Cards", "Design"] as const;
+
+function segmented(options: string[], current: string, onPick: (value: string) => void) {
+  return html`<div class="seg">
+    ${options.map((o) => html`<button class=${o === current ? "on" : ""} @click=${() => onPick(o)}>${o}</button>`)}
+  </div>`;
+}
+
 function update(): void {
   document.documentElement.dataset.theme = theme;
   const app = document.getElementById("app")!;
+  const states: Array<Preset | undefined> = [undefined, ...(scene.presets ?? [])];
   render(
     html`
+      <nav>
+        <h1>YVZ cards</h1>
+        ${GROUPS.map((group) => {
+          const list = scenes.filter((s) => (s.group ?? "Cards") === group);
+          return list.length
+            ? html`<h2>${group}</h2>
+                <ul>
+                  ${list.map(
+                    (s) => html`<li>
+                      <button class="scene ${s === scene ? "on" : ""}" @click=${() => { openScene(s); persist(); update(); }}>
+                        ${s.name}${s.presets?.length ? html`<small>${s.presets.length}</small>` : ""}
+                      </button>
+                    </li>`,
+                  )}
+                </ul>`
+            : "";
+        })}
+        <p class="keys">↑ ↓ scene · ← → state</p>
+      </nav>
       <aside>
-        <h2>Card</h2>
-        <label>Scene
-          <select @change=${(e: Event) => {
-            resetScene(scenes.find((s) => s.name === (e.target as HTMLSelectElement).value) ?? scene);
-            update();
-          }}>
-            ${scenes.map((s) => html`<option ?selected=${s === scene}>${s.name}</option>`)}
-          </select>
-        </label>
-        <label>Language
-          <select @change=${(e: Event) => { language = (e.target as HTMLSelectElement).value; update(); }}>
-            ${["en", "nl", "tr"].map((l) => html`<option ?selected=${l === language}>${l}</option>`)}
-          </select>
-        </label>
-        <label>Theme
-          <select @change=${(e: Event) => { theme = (e.target as HTMLSelectElement).value; update(); }}>
-            ${["dark", "light"].map((t) => html`<option ?selected=${t === theme}>${t}</option>`)}
-          </select>
-        </label>
+        <h2>View</h2>
+        <div class="field">Language ${segmented(["en", "nl", "tr"], language, (l) => { language = l; persist(); update(); })}</div>
+        <div class="field">Theme ${segmented(["dark", "light"], theme, (t) => { theme = t; persist(); update(); })}</div>
         <label>Width: ${width}px
           <input type="range" min="260" max="1400" step="10" .value=${live(String(width))}
-            @input=${(e: Event) => { width = Number((e.target as HTMLInputElement).value); update(); }} />
+            @input=${(e: Event) => { width = Number((e.target as HTMLInputElement).value); persist(); update(); }} />
         </label>
         <label>Panel height: ${height ? `${height}px` : "auto"}
           <input type="range" min="0" max="1400" step="10" .value=${live(String(height))}
-            @input=${(e: Event) => { height = Number((e.target as HTMLInputElement).value); update(); }} />
+            @input=${(e: Event) => { height = Number((e.target as HTMLInputElement).value); persist(); update(); }} />
         </label>
         <label class="check"><input type="checkbox" .checked=${failServices}
           @change=${(e: Event) => { failServices = (e.target as HTMLInputElement).checked; }} />Services fail</label>
-        <h2>State</h2>
+        <h2>Entities</h2>
         ${scene.controls.map(renderControl)}
         <h2>Config (JSON)</h2>
         <textarea class=${configError ? "bad" : ""} .value=${live(configText)}
           @input=${(e: Event) => { configText = (e.target as HTMLTextAreaElement).value; applyConfig(); update(); }}></textarea>
       </aside>
       <main>
+        <header class="bar">
+          <span class="title">${scene.name}</span>
+          ${states.length > 1
+            ? html`<div class="states" role="tablist" aria-label="State">
+                ${states.map(
+                  (p) => html`<button class="chip ${p === preset ? "on" : ""}" role="tab" aria-selected=${p === preset}
+                    @click=${() => { openScene(scene, p); persist(); update(); }}>${p?.name ?? "Default"}</button>`,
+                )}
+              </div>`
+            : ""}
+        </header>
         <div class="stage ${height ? "panel" : ""}" style="width: ${width}px; ${height ? `height: ${height}px` : ""}"></div>
         <ul class="log">${log.length ? log.map((l) => html`<li>${l}</li>`) : html`<li>service calls appear here</li>`}</ul>
       </main>
@@ -169,18 +248,37 @@ function update(): void {
   syncCard(app.querySelector(".stage")!);
 }
 
-resetScene(scene);
-// Handy for opening a specific state: ?scene=Heating&width=1100&height=900&theme=dark&lang=nl
+// Where to start: the address wins (it also takes ?s.key=value overrides for one entity value), then what
+// was saved last time, then the first scene.
 const query = new URLSearchParams(location.search);
-const named = scenes.find((s) => s.name.toLowerCase() === query.get("scene")?.toLowerCase());
-if (named) resetScene(named);
-// State overrides: ?s.shift=d&s.speed=108
+const saved = readSaved();
+const wanted = query.get("scene") ?? saved.scene;
+const start = scenes.find((s) => s.name.toLowerCase() === wanted?.toLowerCase()) ?? scenes[0];
+const stateName = query.has("scene") ? query.get("state") : saved.state;
+openScene(start, start.presets?.find((p) => p.name.toLowerCase() === stateName?.toLowerCase()));
 for (const [key, raw] of query) {
   if (!key.startsWith("s.")) continue;
   values[key.slice(2)] = raw === "true" ? true : raw === "false" ? false : raw !== "" && !Number.isNaN(Number(raw)) ? Number(raw) : raw;
 }
-width = Number(query.get("width")) || width;
-height = Number(query.get("height")) || height;
-theme = query.get("theme") ?? theme;
-language = query.get("lang") ?? language;
+const sameScene = saved.scene === start.name && saved.state === preset?.name;
+width = Number(query.get("width")) || (sameScene ? saved.width : undefined) || width;
+height = query.has("height") ? Number(query.get("height")) : sameScene && saved.height !== undefined ? saved.height : height;
+theme = query.get("theme") ?? saved.theme ?? theme;
+language = query.get("lang") ?? saved.language ?? language;
+
+document.addEventListener("keydown", (e) => {
+  const target = e.target as HTMLElement;
+  if (e.metaKey || e.ctrlKey || e.altKey || /^(INPUT|SELECT|TEXTAREA)$/.test(target.tagName)) return;
+  const move: Record<string, ["scene" | "state", 1 | -1]> = {
+    ArrowDown: ["scene", 1],
+    ArrowUp: ["scene", -1],
+    ArrowRight: ["state", 1],
+    ArrowLeft: ["state", -1],
+  };
+  if (!move[e.key]) return;
+  e.preventDefault();
+  step(...move[e.key]);
+});
+
+persist();
 update();

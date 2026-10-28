@@ -1,6 +1,6 @@
 # YVZ Cards
 
-Custom Home Assistant dashboard cards with one shared look: a stove remote, a server panel, a heating thermostat, heating statistics, a Tesla and a gauge for any entity. Every card has a visual editor and is translated into English, Dutch and Turkish; the language follows your Home Assistant profile.
+Custom Home Assistant dashboard cards with one shared look: a stove remote, a server panel, a heating thermostat, heating statistics, a Tesla, a 3D printer and a gauge for any entity. Every card has a visual editor and is translated into English, Dutch and Turkish; the language follows your Home Assistant profile.
 
 | Card | Type | What it does |
 |---|---|---|
@@ -9,6 +9,7 @@ Custom Home Assistant dashboard cards with one shared look: a stove remote, a se
 | [Heating](#heating-card) | `custom:yvz-heating-card` | Thermostat dial with on/off, Eco/Comfort/Boost and a room picker for the leading sensor |
 | [Heating stats](#heating-stats-card) | `custom:yvz-heating-stats-card` | How much the heating runs and how well it works: runtime, starts, temperatures, warm-up and events |
 | [Gauge](#gauge-card) | `custom:yvz-gauge-card` | One entity as a line, segmented or stat gauge, with colour thresholds and a trend |
+| [Printer](#printer-card) | `custom:yvz-printer-card` | 3D printer with a live camera: printing, ready and off, with preheat, pause and stop |
 | [Tesla](#tesla-card) | `custom:yvz-tesla-card` | Battery, range and charging, climate, charge limit and car controls, or a status-only compact card |
 
 ## Installation
@@ -271,6 +272,37 @@ trend: true
 | `trend`, `trend_hours` | `false`, `24` | A trend line under the gauge. |
 | `tap_action`, `hold_action` | more-info, none | `more-info`, `toggle`, `call-service`, `navigate`, `url` or `none`. |
 
+## Printer card
+
+```yaml
+type: custom:yvz-printer-card
+```
+
+A 3D printer with a live camera, built for OctoPrint behind a smart plug. With the default entity names it needs no configuration; any entity can be overridden in the visual editor or in YAML.
+
+| Option | Default | Description |
+|---|---|---|
+| `name` | "Printer" | Card title. |
+| `camera` | `camera.octoprint_camera` | The live picture. Tap it to open the camera. |
+| `power` | `switch.grillplats_plug` | The printer counts as off when this isn't `on`. |
+| `printing`, `state`, `progress`, `finish`, `file` | `binary_sensor.octoprint_printing`, `sensor.octoprint_current_state`, `sensor.octoprint_job_percentage`, `sensor.octoprint_estimated_finish_time`, `sensor.octoprint_current_file` | What OctoPrint reports. `finish` is a timestamp. |
+| `hotend`, `bed` | `actual: sensor.octoprint_actual_tool0_temp` / `sensor.octoprint_actual_bed_temp`, `target: number.octoprint_extruder_temperature` / `number.octoprint_bed_temperature` | Measured and target temperature of each. |
+| `buttons` | `pause`, `resume`, `stop`: `button.octoprint_pause_job`, `_resume_job`, `_stop_job` | OctoPrint's job buttons. |
+| `scripts` | `power_on`, `preheat_pla`, `preheat_petg`, `cooldown`, `temp_adjust`, `power_off`: `script.printer_power_on`, `printer_preheat_pla`, `printer_preheat_petg`, `printer_cooldown`, `printer_temp_adjust`, `printer_power_off_safe` | `temp_adjust` receives `entity` and `delta`. |
+| `step` | `5` | °C per tap on − and +. |
+| `start` | `sensor.octoprint_start_time` | A timestamp: when the print started. Used for the elapsed time and for how long a print took. |
+| `presets` | PLA and PETG | Preheat buttons: a list of `name`, `hotend`, `bed`, optional `icon`, and optionally a `script` to run instead of setting temperatures. Without any, PLA and PETG run the preheat scripts. |
+| `bed_safe` | `45` | The bed counts as still hot above this temperature (°C) when nothing is printing. |
+
+- **Off:** the camera and a power button that needs a second tap to turn the printer on.
+- **Waiting:** the printer is on but OctoPrint isn't connected yet.
+- **Hot bed:** a warning under the controls while the bed is above `bed_safe` and nothing is printing.
+- **Ready:** preheat (PLA and PETG, or your own presets), cool down, hotend and bed − and + (through `temp_adjust`), and "Power off after cooling", which needs a second tap. While a target is set, a small trend of the last hour shows under the row. After a print that ran to the end it says "Finished 14:32 · took 3 h 10 min". Tap a target temperature to type an exact value: Enter sets it, Escape cancels. It goes through `temp_adjust` as the step from the current target, within the target entity's min and max.
+- **Printing and paused:** progress and the file name, the time left and how long it has been running, the finish time in the header, the temperatures against their targets with a trend of the last hour, the percentage on the camera, Pause or Resume, and Stop with a second tap.
+- **Error:** a banner, with the same controls as ready.
+- The camera stops streaming when the card leaves the page, starts again when the tab becomes visible, and retries a few seconds after the stream breaks.
+- Two columns, camera left and controls right, from 640 px card width. Fills the height of a panel view.
+
 ## Tesla card
 
 ```yaml
@@ -328,6 +360,6 @@ npm run dev          # rebuild dist/yvz-cards.js on every change
 npm run build        # type-check and build
 ```
 
-The playground has a scene per card with controls for every state, a light and dark theme, a language switch, a width slider and a switch that makes service calls fail.
+The playground lists the scenes on the left and has a row of states for each scene (for example the stove igniting or failing, the printer finished), controls for every entity, a light and dark theme, a language switch, a width and panel height slider and a switch that makes service calls fail. It remembers the scene and state across reloads, also in the address (`?scene=Stove&state=Igniting`), and the arrow keys move through scenes (up, down) and states (left, right).
 
 Publishing a GitHub release builds `yvz-cards.js` and attaches it to the release, which is what HACS installs. See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
