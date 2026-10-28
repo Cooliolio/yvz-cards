@@ -862,10 +862,17 @@ const gaugeCard: Scene = {
   },
 };
 
-// A stand-in for the camera: a dark bench with a build plate.
-const PRINTER_PICTURE = `data:image/svg+xml,${encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b4048"/><stop offset="1" stop-color="#16181c"/></linearGradient></defs><rect width="640" height="360" fill="url(#g)"/><rect x="170" y="240" width="300" height="14" rx="3" fill="#5b616b"/><path d="M200 240 L240 150 H400 L440 240 Z" fill="#c4543a" opacity=".85"/><rect x="300" y="60" width="40" height="70" rx="4" fill="#8b929c"/><rect x="312" y="130" width="16" height="24" fill="#5b616b"/></svg>',
-)}`;
+// A stand-in for the camera: a dark bench with a build plate, in the shape the camera asks for.
+const printerPicture = (shape: string): string => {
+  const [w, h] = shape.split(":").map(Number);
+  const width = 640;
+  const height = Math.round((width * h) / w);
+  const cx = width / 2;
+  const base = height * 0.67;
+  return `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b4048"/><stop offset="1" stop-color="#16181c"/></linearGradient></defs><rect width="${width}" height="${height}" fill="url(#g)"/><rect x="${cx - 150}" y="${base}" width="300" height="14" rx="3" fill="#5b616b"/><path d="M${cx - 120} ${base} L${cx - 80} ${base - 90} H${cx + 80} L${cx + 120} ${base} Z" fill="#c4543a" opacity=".85"/><rect x="${cx - 20}" y="${base - 180}" width="40" height="70" rx="4" fill="#8b929c"/><rect x="${cx - 8}" y="${base - 110}" width="16" height="24" fill="#5b616b"/><text x="14" y="${height - 14}" fill="#9aa0a8" font-family="sans-serif" font-size="22">${shape}</text></svg>`,
+  )}`;
+};
 
 const PRINTER_STATES: Record<string, string> = {
   off: "offline",
@@ -892,6 +899,7 @@ const printer: Scene = {
     gaugeControl("bed", "Bed (°C)", 59, 0, 120),
     gaugeControl("bedTarget", "Bed target (°C)", 60, 0, 120, 5),
     { key: "camera", label: "Camera picture", type: "checkbox", value: true },
+    { key: "shape", label: "Camera shape", type: "select", value: "16:9", options: ["16:9", "4:3", "1:1", "9:16", "21:9"] },
   ],
   states(v) {
     const n = (k: string) => Number(v[k]);
@@ -912,7 +920,7 @@ const printer: Scene = {
       entity("number.octoprint_extruder_temperature", String(n("hotendTarget")), { unit_of_measurement: "°C" }),
       sensor("sensor.octoprint_actual_bed_temp", n("bed"), "°C"),
       entity("number.octoprint_bed_temperature", String(n("bedTarget")), { unit_of_measurement: "°C" }),
-      entity("camera.octoprint_camera", "idle", v.camera ? { entity_picture: PRINTER_PICTURE } : {}),
+      entity("camera.octoprint_camera", "idle", v.camera ? { entity_picture: printerPicture(String(v.shape)) } : {}),
     ];
     return Object.fromEntries(list.map((e) => [e.entity_id, e]));
   },
@@ -949,6 +957,10 @@ printer.presets = [
   { name: "Paused", values: { mode: "paused" } },
   { name: "Error", values: { mode: "error", hotend: 31, hotendTarget: 0, bed: 28, bedTarget: 0 } },
   { name: "No camera picture", values: { camera: false } },
+  { name: "Camera 4:3", values: { shape: "4:3" } },
+  { name: "Camera portrait", values: { shape: "9:16" } },
+  { name: "Camera ultra wide", values: { shape: "21:9" } },
+  { name: "Wide panel", width: 1400, height: 800 },
   {
     name: "Finished",
     values: { mode: "ready", progress: 100, hotend: 38, hotendTarget: 0, bed: 52, bedTarget: 0, elapsed: 190, finishedAgo: 20 },

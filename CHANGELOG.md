@@ -2,6 +2,16 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.9.1 — 2026-10-28
+
+### Fixed
+
+- Printer: the camera keeps the stream's own aspect ratio and is never cropped. It used to be a fixed 16:9 box that filled the frame, so a 4:3, square or portrait camera lost its top and bottom, and a height cap on narrow cards made it worse. A cap on the height (260 px on narrow cards, 560 px from 640 px card width) now letterboxes the picture instead.
+
+### Added
+
+- Playground: printer states for a 4:3, portrait and ultra-wide camera and for a wide panel, and a camera shape control.
+
 ## 0.9.0 — 2026-10-28
 
 ### Added

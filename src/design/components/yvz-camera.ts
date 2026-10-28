@@ -4,8 +4,10 @@ import { designStyles } from "../styles";
 
 const RETRY_MS = 8000;
 
-// A camera picture. It drops the stream when the card leaves the page, shows a placeholder when there is
-// no picture, and asks for a new address (yvz-retry) a few seconds after the stream breaks.
+// A camera picture. It takes the stream's own aspect ratio once the first frame arrives and never crops:
+// when `--yvz-camera-max-height` caps the height the picture is letterboxed instead.
+// It drops the stream when the card leaves the page, shows a placeholder when there is no picture, and asks for
+// a new address (yvz-retry) a few seconds after the stream breaks.
 // Anything in the "overlay" slot sits in the top left corner.
 @customElement("yvz-camera")
 export class YvzCamera extends LitElement {
@@ -26,7 +28,8 @@ export class YvzCamera extends LitElement {
         overflow: hidden;
         border-radius: var(--yvz-radius-md);
         background: var(--yvz-surface-raised);
-        aspect-ratio: 16 / 9;
+        aspect-ratio: var(--_ratio, 16 / 9);
+        max-height: var(--yvz-camera-max-height, none);
         min-width: 0;
       }
 
@@ -35,7 +38,7 @@ export class YvzCamera extends LitElement {
         inset: 0;
         width: 100%;
         height: 100%;
-        object-fit: cover;
+        object-fit: contain;
       }
 
       .none {
@@ -93,6 +96,12 @@ export class YvzCamera extends LitElement {
     }
   }
 
+  // The picture's real shape, so the box matches the stream whatever camera it is.
+  private onLoad(e: Event): void {
+    const { naturalWidth: w, naturalHeight: h } = e.target as HTMLImageElement;
+    if (w > 0 && h > 0) this.style.setProperty("--_ratio", `${w} / ${h}`);
+  }
+
   private onError(): void {
     this.failed = true;
     clearTimeout(this.retry);
@@ -102,7 +111,7 @@ export class YvzCamera extends LitElement {
   protected override render() {
     const showing = this.src && this.live && !this.failed;
     return html`
-      ${showing ? html`<img src=${this.src} alt="" draggable="false" @error=${this.onError} />` : html`<div class="none"><ha-icon icon="mdi:camera-off"></ha-icon>${this.label}</div>`}
+      ${showing ? html`<img src=${this.src} alt="" draggable="false" @load=${this.onLoad} @error=${this.onError} />` : html`<div class="none"><ha-icon icon="mdi:camera-off"></ha-icon>${this.label}</div>`}
       <div class="overlay"><slot name="overlay"></slot></div>
     `;
   }

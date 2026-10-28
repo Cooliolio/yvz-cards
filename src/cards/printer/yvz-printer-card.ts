@@ -154,7 +154,8 @@ export class YvzPrinterCard extends YvzCard<PrinterCardConfig> {
     }
     const url = picture.replace("/camera_proxy/", "/camera_proxy_stream/");
     // A fresh query makes the browser open the stream again even if the address is otherwise the same.
-    this.cameraSrc = `${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`;
+    // Inline images have nothing to reopen, and a query would corrupt them.
+    this.cameraSrc = url.startsWith("data:") ? url : `${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`;
   }
 
   /* ---------- actions ---------- */
@@ -399,8 +400,9 @@ export class YvzPrinterCard extends YvzCard<PrinterCardConfig> {
         margin-top: var(--yvz-space-3);
       }
 
+      /* the picture keeps the stream's shape; a cap on the height letterboxes it rather than cropping */
       .camera {
-        max-height: 260px;
+        --yvz-camera-max-height: 260px;
         width: 100%;
         cursor: pointer;
       }
@@ -527,7 +529,7 @@ export class YvzPrinterCard extends YvzCard<PrinterCardConfig> {
         }
 
         .camera {
-          max-height: none;
+          --yvz-camera-max-height: 560px;
         }
       }
     `,
