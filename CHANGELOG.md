@@ -2,7 +2,9 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
-## 0.10.2 — 2026-10-28
+## 0.10.3 — 2026-10-28
+
+v0.10.2 was published by mistake, without its file (`yvz-cards.js`), and describes an approach that was dropped. Skip it: everything it was meant to contain is in this release.
 
 ### Fixed
 
@@ -12,6 +14,10 @@ All notable changes to YVZ Cards. Versions follow [semantic versioning](https://
 
 - Small text under the player says which step failed and how ("mp4 fetch failed: 400", "clip failed: code 4", "mp4 timed out"), so the failing step is visible on a phone.
 - Tests for both ways of playing: the order and failure messages when playing the address directly, and the download, the size limits, failed and empty answers, the "Loading clip…" state and the cleanup when downloading first. The playground's fake Frigate now answers clips the way the real one does.
+
+## 0.10.2 — 2026-10-28
+
+Published by mistake without a file and with an approach that didn't work. Skip this version and use 0.10.3.
 
 ## 0.10.1 — 2026-10-28
 
