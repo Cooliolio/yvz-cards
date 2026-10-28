@@ -26,17 +26,29 @@ const STALL_MS = 8000;
 const SIGN_SECONDS = 600;
 const DAY_MS = 86_400_000;
 
-// hls: the review as a playlist, which Safari and the iOS app play natively.
-// mp4: the recording, one file. It ignores range requests, which iOS often refuses.
-// clip: the detection clip, shorter than the review.
-type SourceKind = "hls" | "mp4" | "clip";
+// mp4: the recording of the whole review. clip: the detection clip, shorter than the review.
+// Both come back from Frigate as fragmented mp4 in a chunked 200, with no length and no range support.
+type SourceKind = "mp4" | "clip";
 
 interface Source {
   url: string;
   kind: SourceKind;
 }
 
-const HLS_TYPE = "application/vnd.apple.mpegurl";
+// A clip bigger than this isn't downloaded to play: the next source is tried instead.
+const MAX_CLIP_BYTES = 80 * 1024 * 1024;
+// A download that hasn't finished by then is given up on.
+const DOWNLOAD_MS = 30_000;
+
+// Why a download didn't produce a clip.
+class ClipError extends Error {
+  constructor(
+    readonly status?: number,
+    readonly bytes?: number,
+  ) {
+    super("clip download failed");
+  }
+}
 
 interface Playback {
   status: "loading" | "playing" | "failed";
@@ -58,6 +70,8 @@ export class YvzFrigateReviewCard extends YvzCard<FrigateReviewConfig> {
   @state() private perPage = 2;
   @state() private playback: Playback = { status: "loading", short: false };
   @state() private failures: string[] = [];
+  // A clip is being downloaded to play from memory (Safari).
+  @state() private downloading = false;
   @query(".strip") private strip?: HTMLElement;
   @query("video") private video?: HTMLVideoElement;
 
@@ -70,6 +84,8 @@ export class YvzFrigateReviewCard extends YvzCard<FrigateReviewConfig> {
   private token = 0;
   private sources: Source[] = [];
   private attemptAt = 0;
+  private objectUrl?: string;
+  private download?: AbortController;
   private stall?: ReturnType<typeof setTimeout>;
   private lazy?: IntersectionObserver;
   private lazyRoot?: Element | null;
@@ -112,6 +128,7 @@ export class YvzFrigateReviewCard extends YvzCard<FrigateReviewConfig> {
     clearTimeout(this.stall);
     cancelAnimationFrame(this.frame);
     document.removeEventListener("visibilitychange", this.onVisible);
+    this.releaseClip();
     this.resize?.disconnect();
     this.lazy?.disconnect();
     this.lazy = undefined;
@@ -235,15 +252,14 @@ export class YvzFrigateReviewCard extends YvzCard<FrigateReviewConfig> {
     }
   }
 
-  // The signed address of the review as a recording (mp4) or as a playlist (hls).
-  private async signedUrl(r: Review, kind: "mp4" | "hls"): Promise<string> {
+  // The signed address of the review's recording.
+  private async recordingUrl(r: Review): Promise<string> {
     const o = this.opts;
     const start = Math.floor(r.start_time - o.pre);
     const endRaw = r.end_time ? r.end_time : Date.now() / 1000;
     const end = Math.max(Math.ceil(endRaw + (r.end_time ? o.post : 0)), start + 1);
-    const base = `/api/frigate/${encodeURIComponent(o.instance)}`;
-    const span = `${encodeURIComponent(r.camera)}/start/${start}/end/${end}`;
-    const path = kind === "mp4" ? `${base}/recording/${span}` : `${base}/vod/${span}/index.m3u8`;
+    const path =
+      `/api/frigate/${encodeURIComponent(o.instance)}/recording/` + `${encodeURIComponent(r.camera)}/start/${start}/end/${end}`;
     const res = await this.hass!.callWS<{ path: string }>({ type: "auth/sign_path", path, expires: SIGN_SECONDS });
     return res.path;
   }
@@ -260,46 +276,99 @@ export class YvzFrigateReviewCard extends YvzCard<FrigateReviewConfig> {
     void this.play(review);
   }
 
-  // What plays depends on the device. Safari and the iOS app play HLS and often refuse the plain recording
-  // (it ignores range requests, and may be H.265), so they start with the playlist; everything else starts
-  // with the recording. Then the other one, then the detection clip, which is short but plays almost anywhere.
+  // Safari, and every browser on iOS (the Home Assistant app too), won't play Frigate's clips as a plain video
+  // address: they come as chunked fragmented mp4 without a length or range support. From memory they play fine,
+  // so there the clip is downloaded first. Everywhere else the address goes straight to the video.
+  private get downloadFirst(): boolean {
+    const ua = navigator.userAgent;
+    const ios = /iP(hone|ad|od)/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const safari = /Safari/.test(ua) && !/Chrome|Chromium|Android|Edg|OPR|Firefox/.test(ua);
+    return ios || safari;
+  }
+
+  // The recording first, then the detection clip, which is short but the most dependable.
   private async play(review: Review): Promise<void> {
     const token = ++this.token;
-    clearTimeout(this.stall);
+    this.releaseClip();
     this.failures = [];
     this.playback = { status: "loading", short: false };
-    const [mp4, hls] = await Promise.allSettled([this.signedUrl(review, "mp4"), this.signedUrl(review, "hls")]);
+    let recording: string | undefined;
+    try {
+      recording = await this.recordingUrl(review);
+    } catch {
+      recording = undefined;
+    }
     if (token !== this.token) return;
-    const url = (r: PromiseSettledResult<string>) => (r.status === "fulfilled" ? r.value : undefined);
-    const probe = this.video ?? document.createElement("video");
-    const hlsFirst = !!probe.canPlayType?.(HLS_TYPE);
-    const full: Array<Source | undefined> = [
-      url(mp4) ? { url: url(mp4)!, kind: "mp4" } : undefined,
-      url(hls) ? { url: url(hls)!, kind: "hls" } : undefined,
-    ];
-    if (hlsFirst) full.reverse();
     const detection = [...(review.data?.detections ?? [])].sort()[0];
     this.sources = [
-      ...full,
+      recording ? { url: recording, kind: "mp4" as const } : undefined,
       detection
         ? { url: `/api/frigate/notifications/${encodeURIComponent(detection)}/${encodeURIComponent(review.camera)}/clip.mp4`, kind: "clip" as const }
         : undefined,
     ].filter((src): src is Source => !!src);
-    this.playback = { status: "loading", short: false, link: url(mp4) ?? url(hls) };
-    this.attempt(token, 0);
+    this.playback = { status: "loading", short: false, link: recording };
+    void this.attempt(token, 0);
   }
 
   // The step that failed and how, small enough for a phone: "mp4 failed: code 4".
-  private fail(kind: SourceKind, code?: number): void {
-    const t = this.t;
-    this.failures = [...this.failures, code === undefined ? t("frigate.timed_out", { type: kind }) : t("frigate.failed", { type: kind, code })];
+  private fail(message: string): void {
+    this.failures = [...this.failures, message];
   }
 
-  private attempt(token: number, index: number): void {
+  // Reads a clip into memory, never more than MAX_CLIP_BYTES, and returns an address the video can play.
+  private async fetchClip(url: string): Promise<string> {
+    this.download?.abort();
+    const controller = new AbortController();
+    this.download = controller;
+    const timer = setTimeout(() => controller.abort(), DOWNLOAD_MS);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) throw new ClipError(res.status);
+      const declared = Number(res.headers.get("content-length"));
+      if (declared > MAX_CLIP_BYTES) throw new ClipError(undefined, declared);
+      const reader = res.body?.getReader();
+      const chunks: BlobPart[] = [];
+      let size = 0;
+      if (reader) {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > MAX_CLIP_BYTES) {
+            controller.abort();
+            throw new ClipError(undefined, size);
+          }
+          chunks.push(value as Uint8Array<ArrayBuffer>);
+        }
+      } else {
+        const blob = await res.blob();
+        size = blob.size;
+        if (size > MAX_CLIP_BYTES) throw new ClipError(undefined, size);
+        chunks.push(blob);
+      }
+      if (!size) throw new ClipError(res.status);
+      return URL.createObjectURL(new Blob(chunks, { type: "video/mp4" }));
+    } finally {
+      clearTimeout(timer);
+      if (this.download === controller) this.download = undefined;
+    }
+  }
+
+  private releaseClip(): void {
+    this.download?.abort();
+    this.download = undefined;
+    this.downloading = false;
+    if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
+    this.objectUrl = undefined;
+  }
+
+  private async attempt(token: number, index: number): Promise<void> {
     if (token !== this.token) return;
     clearTimeout(this.stall);
+    const t = this.t;
     const source = this.sources[index];
     if (!source) {
+      this.releaseClip();
       this.video?.removeAttribute("src");
       this.playback = { status: "failed", short: false, link: this.playback.link };
       return;
@@ -307,15 +376,47 @@ export class YvzFrigateReviewCard extends YvzCard<FrigateReviewConfig> {
     const video = this.video;
     if (!video) return;
     this.attemptAt = index;
+    this.releaseClip();
     this.playback = { status: "loading", short: source.kind === "clip", link: this.playback.link };
+
+    let src = source.url;
+    if (this.downloadFirst) {
+      this.downloading = true;
+      try {
+        src = await this.fetchClip(source.url);
+      } catch (e) {
+        this.downloading = false;
+        // A newer event was opened or the player closed meanwhile: nothing to report.
+        if (token !== this.token) return;
+        const error = e instanceof ClipError ? e : undefined;
+        this.fail(
+          error?.bytes !== undefined
+            ? t("frigate.too_large", { type: source.kind, size: Math.round(error.bytes / 1024 / 1024) })
+            : error?.status
+              ? t("frigate.fetch_failed", { type: source.kind, status: error.status })
+              : e instanceof DOMException && e.name === "AbortError"
+                ? t("frigate.timed_out", { type: source.kind })
+                : t("frigate.fetch_error", { type: source.kind }),
+        );
+        void this.attempt(token, index + 1);
+        return;
+      }
+      this.downloading = false;
+      if (token !== this.token) {
+        URL.revokeObjectURL(src);
+        return;
+      }
+      this.objectUrl = src;
+    }
+
     // Muted and inline, or phones won't start it; play() may still be refused, which is no reason to stop.
     video.muted = true;
-    video.src = source.url;
+    video.src = src;
     video.play()?.catch(() => {});
     this.stall = setTimeout(() => {
       if (token !== this.token || this.playback.status !== "loading") return;
-      this.fail(source.kind);
-      this.attempt(token, index + 1);
+      this.fail(t("frigate.timed_out", { type: source.kind }));
+      void this.attempt(token, index + 1);
     }, STALL_MS);
   }
 
@@ -326,15 +427,16 @@ export class YvzFrigateReviewCard extends YvzCard<FrigateReviewConfig> {
   };
 
   private onVideoError = (): void => {
-    if (!this.selected || this.playback.status === "failed") return;
+    if (!this.selected || this.playback.status === "failed" || this.downloading) return;
     const source = this.sources[this.attemptAt];
-    if (source) this.fail(source.kind, this.video?.error?.code ?? 0);
-    this.attempt(this.token, this.attemptAt + 1);
+    if (source) this.fail(this.t("frigate.failed", { type: source.kind, code: this.video?.error?.code ?? 0 }));
+    void this.attempt(this.token, this.attemptAt + 1);
   };
 
   private close(): void {
     this.token++;
     clearTimeout(this.stall);
+    this.releaseClip();
     const video = this.video;
     if (video) {
       video.pause();
@@ -540,6 +642,7 @@ export class YvzFrigateReviewCard extends YvzCard<FrigateReviewConfig> {
           @playing=${this.onVideoReady}
           @error=${this.onVideoError}
         ></video>
+        ${this.downloading ? html`<div class="loading" role="status">${t("frigate.loading_clip")}</div>` : nothing}
         ${short && status !== "failed" ? html`<yvz-chip class="short" data-state="pending" icon="mdi:content-cut">${t("frigate.short")}</yvz-chip>` : nothing}
         ${status === "failed"
           ? html`<div class="failed" role="alert">
@@ -803,6 +906,16 @@ export class YvzFrigateReviewCard extends YvzCard<FrigateReviewConfig> {
         position: absolute;
         top: var(--yvz-space-2);
         inset-inline-start: var(--yvz-space-2);
+        pointer-events: none;
+      }
+
+      .loading {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: rgb(255 255 255 / 0.8);
+        font-size: var(--yvz-text-body);
         pointer-events: none;
       }
 

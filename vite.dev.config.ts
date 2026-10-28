@@ -3,12 +3,11 @@ import path from "node:path";
 import { defineConfig, type Plugin } from "vite";
 
 // Stands in for Frigate's HTTP endpoints in the playground: previews, thumbnails and clips.
-// The camera decides what happens, so every case of the review card can be tried:
-//   oprit    the full clip plays (without range support, like the real recording endpoint)
+// Clips come back the way the real ones do: a chunked 200 with no length and no range support, which is what
+// Safari won't play as a plain video address. The camera decides what happens, so every case can be tried:
+//   oprit    the full clip plays
 //   veranda  the full clip answers 400 "No recordings found", the short clip plays
 //   garage   neither clip is available
-//   (the playlist for HLS answers for every camera but garage; Chrome can't play it, so it fails with code 4
-//   and the card moves on, like a device that can't use it)
 //   tuin     the full clip never answers, so the card has to give up on it and use the short one
 function fakeFrigate(): Plugin {
   const clip = fs.readFileSync(path.resolve("dev/fixtures/clip.mp4"));
@@ -26,37 +25,27 @@ function fakeFrigate(): Plugin {
           res.writeHead(status, { "Content-Type": type, ...headers });
           res.end(body);
         };
-        const video = (ranges: boolean) => {
-          const range = ranges ? /bytes=(\d*)-(\d*)/.exec(req.headers.range ?? "") : null;
-          if (!range) return send(200, "video/mp4", clip, ranges ? { "Accept-Ranges": "bytes" } : {});
-          const start = Number(range[1] || 0);
-          const end = Number(range[2] || clip.length - 1);
-          send(206, "video/mp4", clip.subarray(start, end + 1), {
-            "Accept-Ranges": "bytes",
-            "Content-Range": `bytes ${start}-${end}/${clip.length}`,
-          });
+        // No Content-Length and no Accept-Ranges: the body goes out in pieces.
+        const video = () => {
+          res.writeHead(200, { "Content-Type": "video/mp4" });
+          const half = Math.floor(clip.length / 2);
+          res.write(clip.subarray(0, half));
+          res.end(clip.subarray(half));
         };
         // /api/frigate/notifications/<id>/review_preview.gif | thumbnail.jpg | <camera>/clip.mp4
         if (parts[2] === "notifications") {
           const id = decodeURIComponent(parts[3] ?? "");
           if (parts[4] === "review_preview.gif" || parts[4] === "thumbnail.jpg") return send(200, "image/svg+xml", picture(id, id));
           if (parts[5] === "clip.mp4") {
-            return parts[4] === "garage" ? send(404, "application/json", '{"message":"Not found"}') : video(true);
+            return parts[4] === "garage" ? send(404, "application/json", '{"message":"Not found"}') : video();
           }
-        }
-        // /api/frigate/<instance>/vod/<camera>/start/<s>/end/<e>/index.m3u8
-        if (parts[3] === "vod") {
-          const playlist = "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nsegment-0.ts\n#EXT-X-ENDLIST\n";
-          return parts[4] === "garage"
-            ? send(404, "application/json", '{"message":"No recordings found"}')
-            : send(200, "application/vnd.apple.mpegurl", playlist);
         }
         // /api/frigate/<instance>/recording/<camera>/start/<s>/end/<e>
         if (parts[3] === "recording" || parts[2] === "recording") {
           const camera = parts[parts.indexOf("recording") + 1];
           // Headers sent, body never: the video keeps waiting.
           if (camera === "tuin") return void res.writeHead(200, { "Content-Type": "video/mp4" });
-          return camera === "oprit" ? video(false) : send(400, "application/json", '{"message":"No recordings found for the time range"}');
+          return camera === "oprit" ? video() : send(400, "application/json", '{"message":"No recordings found for the time range"}');
         }
         return send(404, "text/plain", "not found");
       });

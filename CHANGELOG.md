@@ -6,12 +6,12 @@ All notable changes to YVZ Cards. Versions follow [semantic versioning](https://
 
 ### Fixed
 
-- Frigate review card on iPhone and in the Home Assistant iOS app: the clip stayed black and the short clip didn't play either. The recording (mp4) ignores range requests and may be H.265, which iOS often refuses. Where the browser can play HLS (`canPlayType("application/vnd.apple.mpegurl")`: Safari, the iOS app, newer Chrome) the card now starts with the review's HLS playlist (`/api/frigate/<instance>/vod/<camera>/start/<s>/end/<e>/index.m3u8`, signed like the other paths), then tries the recording, then the detection clip, then shows "Clip not available for this event" with the link. Other browsers start with the recording, then the playlist, then the detection clip. Still muted and inline.
+- Frigate review card on iPhone and in the Home Assistant iOS app: the clip stayed black, and the short clip didn't play either. Frigate sends the recording and the detection clip as fragmented mp4 in a chunked answer with no length and no range support, which Safari won't play as a plain video address. On Safari and iOS the card now downloads the clip first and plays it from memory, with "Loading clip…" while it downloads. A clip over about 80 MB, a failed download or one that takes longer than 30 seconds moves on to the next source. The order stays the recording, then the detection clip, then "Clip not available for this event" with the link. Other browsers still play the address directly. Muted and inline as before. The memory is released when you switch event or close the player.
 
 ### Added
 
-- Small text under the player says which step failed and how ("hls failed: code 4", "mp4 timed out"), so the failing step is visible on a phone.
-- Tests for the playback order on both kinds of browser, the failure chain with its messages, and the timeout. The playground's fake Frigate now answers the HLS endpoint.
+- Small text under the player says which step failed and how ("mp4 fetch failed: 400", "clip failed: code 4", "mp4 timed out"), so the failing step is visible on a phone.
+- Tests for both ways of playing: the order and failure messages when playing the address directly, and the download, the size limits, failed and empty answers, the "Loading clip…" state and the cleanup when downloading first. The playground's fake Frigate now answers clips the way the real one does.
 
 ## 0.10.1 — 2026-10-28
 
