@@ -405,8 +405,11 @@ export class YvzLightCard extends YvzCard<LightCardConfig> {
       }
 
       .status {
+        overflow: hidden;
         color: var(--yvz-text-muted);
         font-variant-numeric: tabular-nums;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       /* controls open and close by animating the row from 0fr to 1fr, so the card height follows */
@@ -472,21 +475,27 @@ export class YvzLightCard extends YvzCard<LightCardConfig> {
       }
 
       ha-card.compact .head {
-        flex: 1;
+        flex: 1 1 0;
+        min-width: 0;
       }
 
+      /* the slider takes a share of the row only while it is open; closed it gives its space (and the gap) back */
       ha-card.compact .collapse {
-        flex: 1.2;
+        flex: 0 1 0;
         min-width: 0;
-        margin-top: 0;
+        margin: 0 0 0 calc(-1 * var(--yvz-space-3));
         grid-template-rows: 1fr;
         grid-template-columns: 0fr;
         transition:
-          grid-template-columns var(--yvz-duration-slow) var(--yvz-ease),
+          flex-basis var(--yvz-duration-slow) var(--yvz-ease),
+          margin var(--yvz-duration-slow) var(--yvz-ease),
           opacity var(--yvz-duration-base) var(--yvz-ease);
       }
 
       ha-card.compact .collapse[data-open] {
+        flex-basis: 38%;
+        min-width: 96px;
+        margin: 0;
         grid-template-columns: 1fr;
       }
 

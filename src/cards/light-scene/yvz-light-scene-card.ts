@@ -123,6 +123,12 @@ export class YvzLightSceneCard extends YvzCard<LightSceneCardConfig> {
         gap: var(--yvz-space-2);
       }
 
+      /* the description ("100% · 4000 K") is a line of text, not a number to read from afar */
+      yvz-tile {
+        --yvz-tile-value-size: var(--yvz-text-body);
+        --yvz-tile-value-line: var(--yvz-line-body);
+      }
+
       .empty {
         margin: 0;
         color: var(--yvz-text-muted);

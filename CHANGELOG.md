@@ -2,6 +2,13 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.11.2 — 2026-10-28
+
+### Fixed
+
+- Light card, compact: on a narrow card the name and status were squeezed to a few letters and wrapped over several lines. The slider now takes about 38 % of the row (at least 96 px), the status stays on one line, and a closed slider gives its space back to the name. The status line also no longer wraps in the normal layout.
+- Light scenes card: the description under a scene ("100% · 4000 K") used the large number size and wrapped, making some tiles taller than others. It now uses the normal text size.
+
 ## 0.11.1 — 2026-10-28
 
 ### Fixed
