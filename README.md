@@ -1,6 +1,6 @@
 # YVZ Cards
 
-Custom Home Assistant dashboard cards with one shared look: a stove remote, a server panel, a heating thermostat, heating statistics, a Tesla, a 3D printer and a gauge for any entity. Every card has a visual editor and is translated into English, Dutch and Turkish; the language follows your Home Assistant profile.
+Custom Home Assistant dashboard cards with one shared look: a stove remote, a server panel, a heating thermostat, heating statistics, a Tesla, a 3D printer, recent Frigate events and a gauge for any entity. Every card has a visual editor and is translated into English, Dutch and Turkish; the language follows your Home Assistant profile.
 
 | Card | Type | What it does |
 |---|---|---|
@@ -10,6 +10,7 @@ Custom Home Assistant dashboard cards with one shared look: a stove remote, a se
 | [Heating stats](#heating-stats-card) | `custom:yvz-heating-stats-card` | How much the heating runs and how well it works: runtime, starts, temperatures, warm-up and events |
 | [Gauge](#gauge-card) | `custom:yvz-gauge-card` | One entity as a line, segmented or stat gauge, with colour thresholds and a trend |
 | [Printer](#printer-card) | `custom:yvz-printer-card` | 3D printer with a live camera: printing, ready and off, with preheat, pause and stop |
+| [Frigate reviews](#frigate-review-card) | `custom:yvz-frigate-review-card` | Recent Frigate events as a swipeable strip or a grid; tap one to play its clip |
 | [Tesla](#tesla-card) | `custom:yvz-tesla-card` | Battery, range and charging, climate, charge limit and car controls, or a status-only compact card |
 
 ## Installation
@@ -302,6 +303,39 @@ A 3D printer with a live camera, built for OctoPrint behind a smart plug. With t
 - **Error:** a banner, with the same controls as ready.
 - The camera stops streaming when the card leaves the page, starts again when the tab becomes visible, and retries a few seconds after the stream breaks.
 - Two columns, camera left and controls right, from 640 px card width. Fills the height of a panel view.
+
+## Frigate review card
+
+```yaml
+type: custom:yvz-frigate-review-card
+title: Camera
+cameras: [oprit, veranda]
+labels: [person]
+```
+
+Recent reviews from the [Frigate integration](https://github.com/blakeblackshear/frigate-hass-integration) as animated previews. Tap one to play its clip right in the card. It replaces the earlier local `frigate-review-card.js`: every option and default is the same, and the old card name still works.
+
+| Option | Default | Description |
+|---|---|---|
+| `title` | "Camera" | Card title. |
+| `layout` | `strip` | `strip` swipes sideways with the newest first; `grid` is the earlier layout. |
+| `count` | `30` (strip), `4` (grid) | How many events, 1 to 30. |
+| `columns` | `2` | Grid columns, 1 to 6. Only the grid uses it. |
+| `severity` | `alert` | `alert`, `detection` or `all`. |
+| `cameras` | all | Frigate camera names. |
+| `labels` | all | Only reviews containing one of these objects, e.g. `person`. |
+| `instance_id` | `frigate` | The Frigate integration instance. |
+| `pre_padding`, `post_padding` | `2`, `3` | Seconds of video before an event starts and after it ends. |
+| `refresh` | `20` | Seconds between refreshes (at least 5). |
+
+- **Strip:** about two tiles show on a phone (more on wider cards), the next one peeks in, and dots below show where you are. The title line says "1–2 of 30". Previews only download when they come near the screen.
+- **Refreshing** never moves the strip or closes the player when nothing changed. When new events arrive at the front, the strip keeps showing what you were looking at.
+- **Load more:** at the end of the strip, a tile fetches the next older events. The refresh keeps them.
+- **Player:** the full clip is tried first. If it doesn't play (the recording endpoint answers "No recordings found" for some events, doesn't support range requests, which iOS Safari often refuses, or never answers), the card moves on after a few seconds to the detection clip, which phones play reliably, and shows a "Short version" chip. If neither works, the player says "Clip not available for this event" with a link to open the full clip in a new tab, instead of staying blank.
+- The player starts muted and inline. Previous and next step through all loaded events; in the strip the left button is the newer event, in the grid the older one, as before. The selected tile stays outlined and scrolls into view.
+- Needs the Frigate integration, which provides the events and the preview and clip endpoints.
+
+**Moving from the local card:** remove the `/local/frigate-review-card.js` resource, since both register `frigate-review-card` and only the first one to load wins. Existing `type: custom:frigate-review-card` cards keep working with this bundle, or switch them to `custom:yvz-frigate-review-card`. Without a `layout` they now show the strip; add `layout: grid` for the earlier look.
 
 ## Tesla card
 

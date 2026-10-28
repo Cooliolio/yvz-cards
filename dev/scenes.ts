@@ -46,6 +46,8 @@ export interface Scene {
     message: Record<string, unknown>,
     values: Record<string, ControlValue>,
   ): Record<string, Array<Record<string, unknown>>> | undefined;
+  // Answers a websocket call other than history; return undefined to leave it to the default.
+  ws?(message: Record<string, unknown>, values: Record<string, ControlValue>): unknown;
   // For cards that look entities up in the registry instead of taking ids.
   registry?: { entities: Record<string, HassEntityRegistryEntry>; devices: Record<string, HassDevice> };
   // Lets service calls change the controls, standing in for HA automations.
@@ -985,4 +987,63 @@ printer.presets = [
   },
 ];
 
-export const scenes: Scene[] = [host, heating, heatingStats, tesla, gaugeCard, stove, printer, gauges];
+const FRIGATE_CAMERAS = ["oprit", "veranda", "garage", "tuin"];
+const FRIGATE_OBJECTS = [["person"], ["car"], ["person", "dog"], ["cat"], ["bicycle"], ["package", "person"], ["bird"]];
+
+// Reviews as the Frigate integration returns them, newest first, one every 37 minutes.
+function frigateReviews(count: number, ongoing: boolean) {
+  const now = Date.now() / 1000;
+  return Array.from({ length: count }, (_, i) => {
+    const live = ongoing && i === 0;
+    const start = live ? now - 40 : now - 90 - i * 37 * 60;
+    return {
+      id: `rev-${i}`,
+      camera: FRIGATE_CAMERAS[i % FRIGATE_CAMERAS.length],
+      severity: "alert",
+      start_time: start,
+      end_time: live ? null : start + 9 + ((i * 13) % 80),
+      data: { objects: FRIGATE_OBJECTS[i % FRIGATE_OBJECTS.length], detections: [`det-${i}`] },
+    };
+  });
+}
+
+const frigate: Scene = {
+  name: "Frigate reviews",
+  tag: "yvz-frigate-review-card",
+  width: 360,
+  config: { type: "custom:yvz-frigate-review-card", title: "Camera" },
+  controls: [
+    gaugeControl("events", "Events", 30, 0, 90),
+    { key: "ongoing", label: "Newest event still going on", type: "checkbox", value: true },
+    { key: "fail", label: "Loading fails", type: "checkbox", value: false },
+  ],
+  states: () => ({}),
+  ws(message, v) {
+    if (message.type === "auth/sign_path") return { path: `${message.path}?authSig=demo` };
+    if (message.type !== "frigate/reviews/get") return undefined;
+    if (v.fail) throw new Error("Not authorised");
+    const before = typeof message.before === "number" ? message.before : Infinity;
+    const cameras = Array.isArray(message.cameras) ? (message.cameras as string[]) : [];
+    return frigateReviews(Number(v.events), Boolean(v.ongoing))
+      .filter((r) => r.start_time < before && (!cameras.length || cameras.includes(r.camera)))
+      .slice(0, Number(message.limit ?? 100));
+  },
+  presets: [
+    { name: "Grid", config: { type: "custom:yvz-frigate-review-card", title: "Camera", layout: "grid", count: 6, columns: 2 }, width: 440 },
+    { name: "Wide strip", width: 1000 },
+    { name: "Phone, 30 events", width: 360 },
+    { name: "Few events", values: { events: 3 } },
+    { name: "No events", values: { events: 0 } },
+    { name: "Loading fails", values: { fail: true } },
+    {
+      name: "Only people",
+      config: { type: "custom:yvz-frigate-review-card", title: "People", labels: ["person"], cameras: ["oprit", "veranda"] },
+    },
+    {
+      name: "Earlier card name",
+      extra: [{ type: "custom:frigate-review-card", title: "Same config, old name", count: 4, columns: 2, severity: "alert" }],
+    },
+  ],
+};
+
+export const scenes: Scene[] = [host, heating, heatingStats, tesla, gaugeCard, stove, printer, frigate, gauges];

@@ -2,6 +2,19 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.10.0 — 2026-10-28
+
+### Added
+
+- **Frigate review card** (`custom:yvz-frigate-review-card`), the earlier local `frigate-review-card` rebuilt on the shared design system. Same options and defaults, and the old card name `frigate-review-card` still works.
+  - New `strip` layout, the default: a horizontal swipe strip with the newest first, about two tiles on a phone, position dots, a "1–2 of 30" counter, and up to 30 events. The grid is still there with `layout: grid`.
+  - Previews download only when they come near the screen. The 20 second refresh keeps the strip's position and the selected tile when nothing changed, and keeps your place when new events arrive. A "Load more" tile fetches older events.
+  - The player never stays blank: when the full clip fails, returns something that isn't video, or never answers, it moves to the detection clip with a "Short version" chip. When nothing plays it says "Clip not available for this event" with a link to open it in a new tab. Muted and inline for phones.
+  - Previous and next step through all loaded events and keep the selected tile outlined and in view.
+  - Visual editor, English, Dutch and Turkish.
+- Design component: `yvz-dots`.
+- Playground: a Frigate scene with fake events and a dev server that stands in for Frigate's preview and clip endpoints. One camera plays, one answers "No recordings found", one has nothing, and one never answers, so every case of the player can be tried.
+
 ## 0.9.1 — 2026-10-28
 
 ### Fixed

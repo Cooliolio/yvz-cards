@@ -100,6 +100,9 @@ function buildHass(): HomeAssistant {
     config: { time_zone: "Europe/Brussels" },
     formatEntityState: (st) => st.state,
     async callWS<T>(message: Record<string, unknown>): Promise<T> {
+      // Scenes can answer other websocket calls themselves, e.g. the Frigate reviews.
+      const answer = scene.ws?.(message, values);
+      if (answer !== undefined) return answer as T;
       if (message.type !== "history/history_during_period") throw new Error("unsupported");
       const custom = scene.history?.(message, values);
       if (custom) return custom as T;
