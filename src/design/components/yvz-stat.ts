@@ -67,9 +67,11 @@ export class YvzStat extends LitElement {
       }
 
       .note {
+        overflow: hidden;
         color: var(--yvz-text-muted);
         font-size: var(--yvz-text-label);
         line-height: var(--yvz-line-label);
+        text-overflow: ellipsis;
         white-space: nowrap;
       }
 

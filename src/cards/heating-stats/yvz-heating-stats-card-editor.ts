@@ -21,6 +21,8 @@ export class YvzHeatingStatsCardEditor extends YvzCardEditor<HeatingStatsConfig>
     return [
       { name: "name", selector: { text: {} } },
       { name: "compact", selector: { boolean: {} } },
+      { name: "show_user", selector: { boolean: {} } },
+      { name: "target_events", selector: { boolean: {} } },
       {
         name: "compare",
         selector: {
@@ -38,6 +40,16 @@ export class YvzHeatingStatsCardEditor extends YvzCardEditor<HeatingStatsConfig>
             options: PERIODS.map((value) => ({ value, label: this.t(`hstats.period.${value}` as TranslationKey) })),
           },
         },
+      },
+      {
+        type: "expandable" as const,
+        name: "outdoor_group",
+        flatten: true,
+        title: this.t("hstats.group.outdoor"),
+        schema: [
+          { name: "outdoor", selector: { entity: { domain: "sensor", device_class: "temperature" } } },
+          { name: "season_start", selector: { text: {} } },
+        ],
       },
       ...Object.entries(STATS_GROUPS).map(([group, keys]) => ({
         type: "expandable" as const,

@@ -13,7 +13,15 @@ export const STATS_ENTITIES = {
   no_warmup: "binary_sensor.heating_no_warm_up",
   sensor_problem: "binary_sensor.heating_sensor_problem",
   battery_low: "binary_sensor.heating_sensor_battery_low",
+  // The helpers the heating card changes; a change to one of them is listed as an event.
+  target: "input_number.heating_target_temp",
+  comfort: "input_number.heating_comfort_temp",
+  eco: "input_number.heating_eco_temp",
+  frost_temp: "input_number.heating_frost_temp",
 } as const;
+
+export const TARGET_KEYS = ["target", "comfort", "eco", "frost_temp"] as const;
+export type TargetKey = (typeof TARGET_KEYS)[number];
 
 // Optional long-term sensors (history_stats). Used when they exist, otherwise computed from history.
 export const STATS_LONG_TERM = {
@@ -44,12 +52,21 @@ export type HeatingStatsConfig = LovelaceCardConfig & {
   compare?: CompareMode;
   // Period shown first; the last one picked is remembered per card in this browser.
   period?: Period;
+  // Names next to the events that someone changed (default true).
+  show_user?: boolean;
+  // Changes to the target, comfort, eco and frost temperatures as events (default true).
+  target_events?: boolean;
+  // The outdoor temperature sensor. Without it there is no outdoor line, no degree-days and no outdoor figure under the bars.
+  outdoor?: string;
+  // Where the season begins, "MM-DD" (default "10-01"); only the pump hours per degree-day of the season use it.
+  season_start?: string;
 } & Partial<Record<StatsEntityKey | StatsLongTermKey, string>>;
 
 // How the editor groups the entity overrides.
 export const STATS_GROUPS: Record<string, (StatsEntityKey | StatsLongTermKey)[]> = {
   heating: ["pump", "climate", "control", "trend", "mode"],
   rooms: ["sensors", "leading"],
+  targets: [...TARGET_KEYS],
   warnings: ["offline", "no_warmup", "sensor_problem", "battery_low"],
   long_term: [
     "runtime_today",

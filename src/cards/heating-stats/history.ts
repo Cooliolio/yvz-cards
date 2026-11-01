@@ -1,10 +1,13 @@
 import { bucket } from "../../design/components/yvz-sparkline";
 import { fetchSamples, type Sample } from "../../shared/history";
 import type { HomeAssistant } from "../../shared/types";
-import type { Period } from "./types";
+import { DAY, HOUR, dayStarts, numeric, timeWeightedMean, valueAt, type Interval, type Point } from "./series";
+import { activeIntervals, adherence, dayMeans, degreeDays, leaderMix, shortCycles } from "./efficiency";
+import { attachOrigin, changesOf, fetchLogbook, mergePresses } from "./events";
+import { TARGET_KEYS, type Period, type TargetKey } from "./types";
 
-export const HOUR = 3_600_000;
-export const DAY = 24 * HOUR;
+export { DAY, HOUR, dayStarts, numeric, timeWeightedMean, valueAt, type Interval, type Point } from "./series";
+
 const MAX_LINE_POINTS = 240;
 // A heating run shorter than this isn't a real warm-up.
 const MIN_WARMUP_MS = 10 * 60_000;
@@ -16,42 +19,6 @@ const SPIKE_WINDOW_MS = 15 * 60_000;
 // A short excursion (a dip and rebound) lasts at most this long, and ends back near where it started.
 const EXCURSION_MS = 5 * 60_000;
 const EXCURSION_RETURN = SPIKE_STEP / 2;
-
-export interface Point {
-  t: number;
-  v: number;
-}
-
-export type Interval = [number, number];
-
-export function numeric(samples: Sample[]): Point[] {
-  return samples.map((s) => ({ t: s.t, v: parseFloat(s.s) })).filter((p) => !Number.isNaN(p.v));
-}
-
-export function valueAt(points: Point[], t: number): number | undefined {
-  let found: number | undefined;
-  for (const p of points) {
-    if (p.t > t) break;
-    found = p.v;
-  }
-  return found ?? points[0]?.v;
-}
-
-// Mean of a stepped series over [from, to], weighting each value by how long it held.
-export function timeWeightedMean(points: Point[], from: number, to: number): number | undefined {
-  if (!points.length || to <= from) return undefined;
-  let sum = 0;
-  let covered = 0;
-  points.forEach((p, i) => {
-    const a = Math.max(p.t, from);
-    const b = Math.min(points[i + 1]?.t ?? to, to);
-    if (b > a) {
-      sum += p.v * (b - a);
-      covered += b - a;
-    }
-  });
-  return covered ? sum / covered : undefined;
-}
 
 export function thin(points: Point[], max = MAX_LINE_POINTS): Point[] {
   if (points.length <= max) return points;
@@ -141,17 +108,6 @@ export function overlap(intervals: Interval[], from: number, to: number): number
   return intervals.reduce((n, [a, b]) => n + Math.max(0, Math.min(b, to) - Math.max(a, from)), 0);
 }
 
-// Local midnights, oldest first, ending with today's.
-export function dayStarts(count: number, now: number): number[] {
-  const d = new Date(now);
-  d.setHours(0, 0, 0, 0);
-  return Array.from({ length: count }, (_, i) => {
-    const day = new Date(d);
-    day.setDate(day.getDate() - (count - 1 - i));
-    return day.getTime();
-  });
-}
-
 export interface Window {
   from: number;
   to: number;
@@ -187,12 +143,26 @@ export interface WarmUp {
   minutes: number;
 }
 
+// The card lists this many events at most; it shows fewer until "Show more" is pressed.
+export const MAX_EVENTS = 20;
+
 export interface StatsEvent {
   t: number;
-  kind: "mode" | "warning" | "run";
+  kind: "mode" | "warning" | "run" | "target";
+  // The mode, the warning, or which temperature helper for a target change.
   key: string;
   // How long a run lasted.
   ms?: number;
+  // The helper that changed and the state it changed to, to find who did it.
+  entity?: string;
+  state?: string;
+  // The new temperature of a target change.
+  value?: number;
+  // How many presses the event stands for.
+  count?: number;
+  // Who did it (a user id, named when drawn) or which automation, with an empty name when unknown.
+  userId?: string;
+  auto?: string;
 }
 
 export interface Totals {
@@ -224,6 +194,15 @@ export interface StatsData {
   setpoint: Point[];
   temperature: Point[];
   rooms: RoomStats[];
+  // The outdoor line for the timeline, and the outdoor average of each bar's day.
+  outdoor: Point[];
+  dayOutdoor: Array<number | undefined>;
+  // Degree-days of the period, when there is outdoor data for it.
+  degreeDays?: number;
+  // The share (0 to 1) of the time with a target that the leading room was at it; not for 30 days.
+  atTarget?: number;
+  // Who led, over the period: the room that led longest and how many others led too.
+  leaders?: { main: string; others: number };
   heatingRate?: number;
   lastWarmUp?: WarmUp;
   events: StatsEvent[];
@@ -241,6 +220,17 @@ export interface StatsEntities {
   mode: string;
   sensors: string;
   warnings: Record<string, string>;
+  targets: Record<TargetKey, string>;
+  leading: string;
+  // The outdoor temperature; without it there is no outdoor line, no degree-days and no outdoor figure under the bars.
+  outdoor?: string;
+}
+
+export interface StatsOptions {
+  // Look up who made each change.
+  showUser: boolean;
+  // List changes to the target, comfort, eco and frost temperatures.
+  targetEvents: boolean;
 }
 
 export async function loadStats(
@@ -249,6 +239,7 @@ export async function loadStats(
   roomMap: Record<string, string>,
   period: Period,
   now: number,
+  options: StatsOptions = { showUser: true, targetEvents: true },
 ): Promise<StatsData> {
   const window = windowOf(period, now);
   const barCount = period === "month" ? 30 : 7;
@@ -256,13 +247,20 @@ export async function loadStats(
   const pumpFrom = Math.min(window.prevFrom, days[0]);
   const roomEntities = Object.values(roomMap);
   const warningIds = Object.values(ids.warnings);
+  const targetIds = options.targetEvents ? TARGET_KEYS.map((k) => ids.targets[k]) : [];
 
-  const [pumpMap, controlMap, climateMap, roomMapSamples, eventMap] = await Promise.all([
+  // The outdoor line is wanted for the bars too, which can reach back further than the period itself.
+  const outdoorFrom = Math.min(window.from, days[0]);
+
+  const [pumpMap, controlMap, climateMap, roomMapSamples, eventMap, logbook, outdoorMap, leadingMap] = await Promise.all([
     fetchSamples(hass, [ids.pump], pumpFrom, now),
     fetchSamples(hass, [ids.control], window.prevFrom, now),
     period === "month" ? Promise.resolve<Record<string, Sample[]>>({}) : fetchSamples(hass, [ids.climate], window.from, now, true),
     fetchSamples(hass, roomEntities, window.from, now),
-    fetchSamples(hass, [ids.mode, ...warningIds], window.from, now),
+    fetchSamples(hass, [ids.mode, ...warningIds, ...targetIds], window.from, now),
+    options.showUser ? fetchLogbook(hass, [ids.mode, ...targetIds], window.from, now) : Promise.resolve([]),
+    ids.outdoor ? fetchSamples(hass, [ids.outdoor], outdoorFrom, now) : Promise.resolve<Record<string, Sample[]>>({}),
+    fetchSamples(hass, [ids.leading], window.from, now),
   ]);
 
   const pump = pumpMap[ids.pump] ?? [];
@@ -276,6 +274,18 @@ export async function loadStats(
   const setpoint = (climateMap[ids.climate] ?? [])
     .map((s) => ({ t: s.t, v: Number(s.a?.temperature) }))
     .filter((p) => Number.isFinite(p.v));
+
+  const outdoorAll = ids.outdoor ? cleanPoints(numeric(outdoorMap[ids.outdoor] ?? [])) : [];
+  // A sensor that held one value all period has only the sample from before it began, so that one is carried in.
+  const before = outdoorAll.filter((p) => p.t < window.from).pop();
+  const outdoorInPeriod = [...(before ? [{ t: window.from, v: before.v }] : []), ...outdoorAll.filter((p) => p.t >= window.from)];
+
+  // A target of 0 is the thermostat having none (it is off), so only a real one counts.
+  const modeSamples = eventMap[ids.mode] ?? [];
+  const atTarget =
+    period === "month" || !modeSamples.length
+      ? undefined
+      : adherence(control, setpoint, activeIntervals(modeSamples, window.from, now), window.from, now)?.share;
 
   const rooms: RoomStats[] = Object.entries(roomMap).map(([name, entity]) => {
     const samples = cleanSamples(roomMapSamples[entity] ?? []);
@@ -312,7 +322,18 @@ export async function loadStats(
     : undefined;
 
   const events: StatsEvent[] = [];
-  (eventMap[ids.mode] ?? []).slice(1).forEach((s) => events.push({ t: s.t, kind: "mode", key: s.s }));
+  // Several short runs close together, as one event.
+  shortCycles(current.intervals, window.from).forEach((c) => events.push({ t: c.t, kind: "run", key: "short", count: c.runs }));
+  changesOf(eventMap[ids.mode] ?? []).forEach((c) => events.push({ t: c.t, kind: "mode", key: c.s, entity: ids.mode, state: c.s }));
+  for (const key of options.targetEvents ? TARGET_KEYS : []) {
+    const entity = ids.targets[key];
+    for (const c of changesOf(eventMap[entity] ?? [])) {
+      const value = parseFloat(c.s);
+      // A helper coming back from unavailable isn't someone changing it.
+      if (Number.isNaN(value) || Number.isNaN(parseFloat(c.from))) continue;
+      events.push({ t: c.t, kind: "target", key, entity, state: c.s, value });
+    }
+  }
   for (const [key, id] of Object.entries(ids.warnings)) {
     const samples = eventMap[id] ?? [];
     samples.forEach((s, i) => {
@@ -322,7 +343,7 @@ export async function loadStats(
   current.intervals.forEach(([a, b]) => {
     if (b - a >= LONG_RUN_MS) events.push({ t: a, kind: "run", key: "run", ms: b - a });
   });
-  events.sort((a, b) => b.t - a.t);
+  const listed = mergePresses(attachOrigin(events, logbook)).sort((a, b) => b.t - a.t);
 
   const totals = (runs: Runs, from: number, to: number): Totals => ({
     runtime: sumOf(runs.intervals),
@@ -354,9 +375,14 @@ export async function loadStats(
     setpoint: thin(setpoint.filter((p) => p.t >= window.from)),
     temperature: thin(control.filter((p) => p.t >= window.from)),
     rooms,
+    outdoor: thin(outdoorInPeriod),
+    dayOutdoor: ids.outdoor ? dayMeans(outdoorAll, days, now) : days.map(() => undefined),
+    degreeDays: ids.outdoor ? degreeDays(outdoorInPeriod, window.from, now) : undefined,
+    atTarget,
+    leaders: leaderMix(leadingMap[ids.leading] ?? [], window.from, now),
     heatingRate: hours > 0 ? rise / hours : undefined,
     lastWarmUp,
-    events: events.slice(0, 20),
+    events: listed.slice(0, MAX_EVENTS),
     empty: !pump.length && !control.length,
     fetchedAt: Date.now(),
     pumpChanged: hass.states[ids.pump]?.last_changed ?? "",

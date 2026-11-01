@@ -13,6 +13,10 @@ export interface Bar {
   current?: boolean;
   // A day that isn't over yet: hatched, because its bar will still grow.
   partial?: boolean;
+  // Nothing happened in this bar: it is drawn as a dashed baseline instead of a bar of 2 px that looks broken.
+  empty?: boolean;
+  // A small line under the label, e.g. the outdoor temperature of that day.
+  sub?: string;
 }
 
 const VALUE_HEIGHT = 16;
@@ -77,6 +81,34 @@ export class YvzBars extends LitElement {
         background: var(--yvz-state, var(--yvz-accent));
       }
 
+      .bar.empty {
+        height: 0;
+        min-height: 0;
+        border-bottom: 2px dotted color-mix(in srgb, var(--yvz-text-muted) 60%, transparent);
+        border-radius: 0;
+        background: none;
+      }
+
+      .col:hover .bar.empty {
+        background: none;
+      }
+
+      .subs {
+        display: flex;
+        gap: var(--_gap, 6px);
+      }
+
+      .subs span {
+        flex: 1;
+        min-width: 0;
+        color: var(--yvz-text-muted);
+        font-size: var(--yvz-text-caption);
+        line-height: var(--yvz-line-caption);
+        opacity: 0.75;
+        text-align: center;
+        white-space: nowrap;
+      }
+
       .bar.current {
         background: var(--yvz-state, var(--yvz-accent));
       }
@@ -121,13 +153,18 @@ export class YvzBars extends LitElement {
         ${this.bars.map(
           (b) => html`<div class="col" role="listitem" title=${b.text ?? String(b.value)} aria-label=${b.text ?? String(b.value)}>
             ${thin ? "" : html`<div class="value">${b.display ?? ""}</div>`}
-            <div class="bar ${b.current ? "current" : ""} ${b.partial ? "partial" : ""}" style="--_ratio: ${top > 0 ? Math.max(0, b.value / top) : 0}"></div>
+            <div class="bar ${b.current ? "current" : ""} ${b.partial ? "partial" : ""} ${b.empty ? "empty" : ""}" style="--_ratio: ${top > 0 ? Math.max(0, b.value / top) : 0}"></div>
           </div>`,
         )}
       </div>
       <div class="labels" style="--_gap: ${thin ? 2 : 6}px" aria-hidden="true">
         ${this.bars.map((b, i) => html`<span>${!thin || i % step === 0 || b.current ? b.label : ""}</span>`)}
       </div>
+      ${this.bars.some((b) => b.sub)
+        ? html`<div class="subs" style="--_gap: ${thin ? 2 : 6}px" aria-hidden="true">
+            ${this.bars.map((b, i) => html`<span>${!thin || i % step === 0 || b.current ? (b.sub ?? "") : ""}</span>`)}
+          </div>`
+        : ""}
     `;
   }
 }

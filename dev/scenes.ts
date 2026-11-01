@@ -495,9 +495,15 @@ interface FakeCase {
   oneDay: boolean;
   // Days of history that exist; earlier ones return nothing, like a new install.
   dataDays: number;
+  // The pump switches on and off every few minutes for three hours, yesterday evening.
+  shortCycle: boolean;
+  // Warm outside, so there are hardly any degree-days.
+  mild: boolean;
 }
 
 const fakePumpOn = (t: number, c: FakeCase): boolean => {
+  const now = Date.now();
+  if (c.shortCycle && t > now - 9 * 3_600_000 && t < now - 6 * 3_600_000) return (t / MINUTE) % 9 < 3;
   const d = new Date(t);
   const h = d.getHours() + d.getMinutes() / 60;
   if (h < 5.5 || h > 23) return false;
@@ -517,13 +523,122 @@ const fakeTemp = (t: number, offset: number, c: FakeCase): number => {
   const spikeAt = midnight(Date.now()) - 10 * 3_600_000;
   return c.spike && Math.abs(t - spikeAt) < 5 * MINUTE ? base + 9 : base;
 };
+const fakeOutdoor = (t: number, c: FakeCase): number =>
+  (c.mild ? 19.5 : 4) + 2.5 * Math.sin((t / DAY_MS) * 2 * Math.PI - 2.2) + 2 * Math.sin(t / (3 * DAY_MS));
+const OUTDOOR = "sensor.buitentemperatuur";
 const roomOffset = (id: string): number => ([...id].reduce((a, ch) => a + ch.charCodeAt(0), 0) % 40) / 10 - 2;
+
+// Who made the changes the Events list shows. Two people live here; a change by an automation has no user.
+const FAKE_USERS: Record<string, { id: string; name: string }> = {
+  yasin: { id: "user-yasin", name: "Yasin" },
+  muzaffer: { id: "user-muzaffer", name: "Muzaffer" },
+};
+
+// The helpers whose changes are listed, with the value they start the period at.
+const TARGET_BASE: Record<string, string> = {
+  "input_number.heating_target_temp": "20",
+  "input_number.heating_comfort_temp": "21",
+  "input_number.heating_eco_temp": "17",
+  "input_number.heating_frost_temp": "7",
+};
+
+interface FakeChange {
+  id: string;
+  t: number;
+  state: string;
+  // A person, an automation, or neither (a restore after a restart): the logbook knows no context for it.
+  user?: keyof typeof FAKE_USERS;
+  auto?: string;
+}
+
+const SCHEDULE = "Heating schedule";
+
+function fakeChanges(start: number, end: number): FakeChange[] {
+  const mode = "input_select.heating_mode";
+  const target = "input_number.heating_target_temp";
+  const out: FakeChange[] = [];
+  const at = (ago: number) => end - ago;
+  // The daily schedule is an automation; the oldest days have lost their logbook, so those carry no context.
+  for (let d = midnight(start); d < end; d += DAY_MS) {
+    const local = new Date(d);
+    local.setHours(6, 30, 0, 0);
+    const morning = local.getTime();
+    local.setHours(22, 30, 0, 0);
+    const evening = local.getTime();
+    const known = (t: number) => end - t < 4 * DAY_MS;
+    out.push({ id: mode, t: morning, state: "Comfort", auto: known(morning) ? SCHEDULE : undefined });
+    out.push({ id: mode, t: evening, state: "Eco", auto: known(evening) ? SCHEDULE : undefined });
+  }
+  out.push({ id: mode, t: at(30 * 3_600_000), state: "Boost", user: "yasin" });
+  out.push({ id: mode, t: at(9 * 3_600_000), state: "Off", user: "muzaffer" });
+  out.push({ id: target, t: at(26 * 3_600_000), state: "19.5", user: "yasin" });
+  // A slider dragged in steps by Muzaffer: five changes, 20 seconds apart, that should show as one.
+  ["17", "17.5", "18", "18.5", "19"].forEach((v, i) => out.push({ id: target, t: at(5 * 3_600_000) + i * 20_000, state: v, user: "muzaffer" }));
+  out.push({ id: target, t: at(3 * 3_600_000), state: "20", auto: "Boost ends" });
+  // Minutes ago, so Today has something to show whatever time of day the playground is opened.
+  out.push({ id: target, t: at(6 * 60_000), state: "21", user: "muzaffer" });
+  out.push({ id: "input_number.heating_eco_temp", t: at(3 * 60_000), state: "16.5", user: "yasin" });
+  out.push({ id: "input_number.heating_eco_temp", t: at(50 * 3_600_000), state: "17.5", user: "yasin" });
+  out.push({ id: "input_number.heating_comfort_temp", t: at(70 * 3_600_000), state: "21.5", user: "muzaffer" });
+  return out.filter((c) => c.t > start && c.t < end).sort((a, b) => a.t - b.t);
+}
+
+// Long-term statistics for the outdoor sensor: one mean per local day, as recorder/statistics_during_period answers.
+function fakeStatistics(message: Record<string, unknown>, v: Record<string, ControlValue>): unknown {
+  if (v.statistics === "fails") throw new Error("statistics unavailable");
+  if (v.statistics === "missing") return {};
+  const end = Date.parse(message.end_time as string);
+  const asked = Date.parse(message.start_time as string);
+  const start = Math.max(asked, end - Number(v.dataDays ?? 60) * DAY_MS);
+  const c = { mild: !!v.mild } as FakeCase;
+  const rows: Array<{ start: number; end: number; mean: number }> = [];
+  for (let day = midnight(start); day < end; day = new Date(day).setHours(24, 0, 0, 0)) {
+    const next = new Date(day).setHours(24, 0, 0, 0);
+    let sum = 0;
+    let n = 0;
+    for (let t = day; t < next; t += 30 * MINUTE) {
+      sum += fakeOutdoor(t, c);
+      n++;
+    }
+    rows.push({ start: day, end: next, mean: sum / n });
+  }
+  return { [OUTDOOR]: rows };
+}
+
+// The logbook, as logbook/get_events answers it: epoch seconds, and a user or automation context where known.
+function fakeLogbook(message: Record<string, unknown>, v: Record<string, ControlValue>): unknown {
+  if (v.logbook === "fails") throw new Error("logbook unavailable");
+  if (v.logbook === "empty") return [];
+  const asked = Date.parse(message.start_time as string);
+  const end = Date.parse(message.end_time as string);
+  const start = Math.max(asked, end - Number(v.dataDays ?? 60) * DAY_MS);
+  const ids = new Set(message.entity_ids as string[]);
+  return fakeChanges(start, end)
+    .filter((c) => ids.has(c.id))
+    .map((c) => ({
+      when: c.t / 1000,
+      entity_id: c.id,
+      state: c.state,
+      ...(c.user ? { context_user_id: FAKE_USERS[c.user].id } : {}),
+      ...(c.auto
+        ? { context_event_type: "automation_triggered", context_domain: "automation", context_name: c.auto, context_entity_id: "automation.fake" }
+        : {}),
+    }));
+}
 
 function fakeHistory(
   message: Record<string, unknown>,
   v: Record<string, ControlValue>,
 ): Record<string, Array<Record<string, unknown>>> {
-  const c: FakeCase = { frost: !!v.frost, spike: !!v.spike, dip: !!v.dip, oneDay: !!v.oneDay, dataDays: Number(v.dataDays ?? 60) };
+  const c: FakeCase = {
+    frost: !!v.frost,
+    spike: !!v.spike,
+    dip: !!v.dip,
+    oneDay: !!v.oneDay,
+    dataDays: Number(v.dataDays ?? 60),
+    shortCycle: !!v.shortCycle,
+    mild: !!v.mild,
+  };
   const end = Date.parse(message.end_time as string);
   const asked = Date.parse(message.start_time as string);
   // Nothing exists before the install, and the first sample is the first real reading.
@@ -550,16 +665,24 @@ function fakeHistory(
       }
     } else if (id === "input_select.heating_mode") {
       push(start, "Eco");
-      for (let d = midnight(start); d < end; d += DAY_MS) {
-        const local = new Date(d);
-        local.setHours(6, 30, 0, 0);
-        if (local.getTime() > start && local.getTime() < end) push(local.getTime(), "Comfort");
-        local.setHours(22, 30, 0, 0);
-        if (local.getTime() > start && local.getTime() < end) push(local.getTime(), "Eco");
-      }
-      const boost = end - 30 * 3_600_000;
-      if (boost > start) push(boost, "Boost");
+      for (const change of fakeChanges(start, end)) if (change.id === id) push(change.t, change.state);
       items.sort((a, b) => Number(a.lu) - Number(b.lu));
+    } else if (id in TARGET_BASE) {
+      push(start, TARGET_BASE[id]);
+      for (const change of fakeChanges(start, end)) if (change.id === id) push(change.t, change.state);
+      items.sort((a, b) => Number(a.lu) - Number(b.lu));
+    } else if (id === OUTDOOR) {
+      for (let t = start; t <= end; t += 10 * MINUTE) push(t, fakeOutdoor(t, c).toFixed(1));
+    } else if (id === "input_select.heating_leading_sensor") {
+      const leader = String(v.leading);
+      const other = Object.keys(ROOMS).find((r) => r !== leader) ?? leader;
+      // The leader changed a while ago, so the period holds two rooms.
+      if (v.leaderChanged && end - 20 * 3_600_000 > start) {
+        push(start, other);
+        push(end - 20 * 3_600_000, leader);
+      } else {
+        push(start, leader);
+      }
     } else if (id.startsWith("binary_sensor.heating_")) {
       push(start, "off");
       const at = end - 3 * DAY_MS;
@@ -600,14 +723,33 @@ const longTermSensors = (v: Record<string, ControlValue>): HassEntity[] => {
   return out;
 };
 
+// Relative humidity per room. Woonkamer is damp; Badkamer has no humidity sensor at all.
+const HUMIDITY: Record<string, number> = { Kelder: 58, Slaapkamer: 49, Woonkamer: 68 };
+
+// The thermometers are devices with a temperature and a humidity entity each. Kelder's humidity entity is
+// missing from the registry, so the card has to find it by its name.
+const statsRegistry = {
+  entities: Object.fromEntries(
+    Object.entries(ROOMS).flatMap(([room, id]) => {
+      const entry = (kind: string) => ({ entity_id: `sensor.${id}_${kind}`, device_id: `dev-${id}`, platform: "fake" });
+      return [
+        [`sensor.${id}_temperature`, entry("temperature")],
+        ...(room in HUMIDITY && room !== "Kelder" ? [[`sensor.${id}_humidity`, entry("humidity")]] : []),
+      ];
+    }),
+  ),
+  devices: Object.fromEntries(Object.entries(ROOMS).map(([room, id]) => [`dev-${id}`, { name: `${room} thermometer` }])),
+};
+
 const heatingStats: Scene = {
   ...heating,
   name: "Heating stats",
   tag: "yvz-heating-stats-card",
   width: 560,
-  config: { type: "custom:yvz-heating-stats-card" },
-  extra: [{ type: "custom:yvz-heating-stats-card", compact: true }],
+  config: { type: "custom:yvz-heating-stats-card", outdoor: OUTDOOR },
+  extra: [{ type: "custom:yvz-heating-stats-card", compact: true, outdoor: OUTDOOR }],
   history: fakeHistory,
+  registry: statsRegistry,
   controls: [
     ...heating.controls,
     { key: "frost", label: "Frost target (5°)", type: "checkbox", value: false },
@@ -617,11 +759,29 @@ const heatingStats: Scene = {
     gaugeControl("dataDays", "Days of history", 60, 1, 60),
     { key: "season", label: "Season sensors", type: "checkbox", value: true },
     { key: "longTerm", label: "Long-term sensors (today, week, month)", type: "checkbox", value: false },
+    { key: "logbook", label: "Logbook (who changed it)", type: "select", value: "normal", options: ["normal", "empty", "fails"] },
+    { key: "mild", label: "Mild outside (no degree-days)", type: "checkbox", value: false },
+    { key: "shortCycle", label: "Pump short-cycling yesterday evening", type: "checkbox", value: true },
+    { key: "leaderChanged", label: "Leading room changed in the period", type: "checkbox", value: true },
+    { key: "statistics", label: "Outdoor statistics", type: "select", value: "normal", options: ["normal", "missing", "fails"] },
   ],
   states(v) {
     const states = heating.states(v);
     for (const e of longTermSensors(v)) states[e.entity_id] = e;
+    states[OUTDOOR] = sensor(OUTDOOR, Number(v.mild ? 19.8 : 3.4), "°C", { device_class: "temperature", state_class: "measurement" });
+    for (const [room, humidity] of Object.entries(HUMIDITY)) {
+      const id = `sensor.${ROOMS[room as keyof typeof ROOMS]}_humidity`;
+      states[id] = sensor(id, humidity, "%", { device_class: "humidity", state_class: "measurement" });
+    }
+    for (const [key, user] of Object.entries(FAKE_USERS)) {
+      states[`person.${key}`] = entity(`person.${key}`, "home", { user_id: user.id, friendly_name: user.name });
+    }
     return states;
+  },
+  ws(message, v) {
+    if (message.type === "logbook/get_events") return fakeLogbook(message, v);
+    if (message.type === "recorder/statistics_during_period") return fakeStatistics(message, v);
+    return undefined;
   },
 };
 
@@ -630,6 +790,14 @@ heatingStats.presets = [
   { name: "Frost target and spike", values: { frost: true, spike: true } },
   { name: "Dip and rebound", values: { dip: true } },
   { name: "One active day", values: { oneDay: true } },
+  { name: "Old config (no outdoor)", config: { type: "custom:yvz-heating-stats-card" }, extra: [] },
+  { name: "Mild outside", values: { mild: true } },
+  { name: "Outdoor statistics missing", values: { statistics: "missing" } },
+  { name: "Outdoor statistics fail", values: { statistics: "fails" } },
+  { name: "Logbook empty", values: { logbook: "empty" } },
+  { name: "Logbook fails", values: { logbook: "fails" } },
+  { name: "Names and targets off", config: { type: "custom:yvz-heating-stats-card", show_user: false, target_events: false } },
+  { name: "Narrow", width: 320, extra: [] },
   {
     name: "New install",
     values: { dataDays: 2 },

@@ -17,6 +17,10 @@ export class YvzTimeline extends LitElement {
   @property({ attribute: false }) runs: [number, number][] = [];
   @property({ attribute: false }) setpoint: TimelinePoint[] = [];
   @property({ attribute: false }) temperature: TimelinePoint[] = [];
+  // Optional faint line for the outdoor temperature, on a scale of its own at the right edge.
+  @property({ attribute: false }) outdoor: TimelinePoint[] = [];
+  // What the tooltip calls it, e.g. "Outside".
+  @property({ attribute: "outdoor-label" }) outdoorLabel = "";
   @property({ type: Number }) height = 140;
   @property() locale = "";
   @property() unit = "°";
@@ -47,7 +51,8 @@ export class YvzTimeline extends LitElement {
       }
 
       .temp,
-      .set {
+      .set,
+      .out {
         fill: none;
         stroke-linecap: round;
         stroke-linejoin: round;
@@ -57,6 +62,12 @@ export class YvzTimeline extends LitElement {
       .temp {
         stroke: var(--yvz-text);
         stroke-width: 1.75;
+      }
+
+      .out {
+        stroke: var(--yvz-standby, var(--yvz-text-muted));
+        stroke-width: 1.25;
+        opacity: 0.55;
       }
 
       .set {
@@ -91,6 +102,13 @@ export class YvzTimeline extends LitElement {
         font-size: var(--yvz-text-caption);
         line-height: var(--yvz-line-caption);
         pointer-events: none;
+      }
+
+      .scale.right {
+        inset-inline-start: auto;
+        inset-inline-end: 0;
+        align-items: flex-end;
+        opacity: 0.7;
       }
 
       .guide {
@@ -165,19 +183,29 @@ export class YvzTimeline extends LitElement {
       hi += 1;
     }
     const y = (v: number) => 2 + (1 - (v - lo) / (hi - lo || 1)) * (plot - 4);
-    const line = (pts: TimelinePoint[], stepped = false): string =>
+    // The outdoor line has a scale of its own: it lives far from the room temperature and would be off the chart.
+    const outside = this.outdoor.map((p) => p.v);
+    let oLo = outside.length ? Math.floor(Math.min(...outside)) : 0;
+    let oHi = outside.length ? Math.ceil(Math.max(...outside)) : 1;
+    if (oHi - oLo < 2) {
+      oLo -= 1;
+      oHi += 1;
+    }
+    const yOut = (v: number) => 2 + (1 - (v - oLo) / (oHi - oLo || 1)) * (plot - 4);
+    const line = (pts: TimelinePoint[], stepped = false, scale: (v: number) => number = y): string =>
       pts
         .map((p, i) => {
           const px = x(p.t).toFixed(2);
           const prev = pts[i - 1];
-          if (!i) return `M${px},${y(p.v).toFixed(2)}`;
-          return stepped ? `L${px},${y(prev.v).toFixed(2)} L${px},${y(p.v).toFixed(2)}` : `L${px},${y(p.v).toFixed(2)}`;
+          if (!i) return `M${px},${scale(p.v).toFixed(2)}`;
+          return stepped ? `L${px},${scale(prev.v).toFixed(2)} L${px},${scale(p.v).toFixed(2)}` : `L${px},${scale(p.v).toFixed(2)}`;
         })
-        .join(" ") + (stepped && pts.length ? ` L100,${y(pts[pts.length - 1].v).toFixed(2)}` : "");
+        .join(" ") + (stepped && pts.length ? ` L100,${scale(pts[pts.length - 1].v).toFixed(2)}` : "");
     const at = this.hover == null ? undefined : this.from + this.hover * span;
     const running = at == null ? false : this.runs.some(([a, b]) => at >= a && at <= b);
     const temp = at == null ? undefined : this.valueAt(this.temperature, at);
     const set = at == null ? undefined : this.valueAt(this.setpoint, at);
+    const out = at == null ? undefined : this.valueAt(this.outdoor, at);
     return html`
       <svg
         viewBox="0 0 100 ${this.height}"
@@ -193,6 +221,7 @@ export class YvzTimeline extends LitElement {
         <line class="grid" x1="0" x2="100" y1=${y(hi)} y2=${y(hi)}></line>
         <line class="grid" x1="0" x2="100" y1=${y(lo)} y2=${y(lo)}></line>
         ${this.setpoint.length ? svg`<g clip-path="url(#plot)"><path class="set" d=${line(this.setpoint, true)}></path></g>` : nothing}
+        ${this.outdoor.length ? svg`<path class="out" d=${line(this.outdoor, false, yOut)}></path>` : nothing}
         ${this.temperature.length ? svg`<path class="temp" d=${line(this.temperature)}></path>` : nothing}
         <rect class="strip" x="0" y=${plot + gap} width="100" height=${stripH} rx="1.5"></rect>
         ${this.runs.map(
@@ -201,6 +230,9 @@ export class YvzTimeline extends LitElement {
       </svg>
       ${all.length
         ? html`<div class="scale" style="height: ${plot}px"><span>${this.fmt(hi)}</span><span>${this.fmt(lo)}</span></div>`
+        : nothing}
+      ${this.outdoor.length
+        ? html`<div class="scale right" style="height: ${plot}px" aria-hidden="true"><span>${this.fmt(oHi)}</span><span>${this.fmt(oLo)}</span></div>`
         : nothing}
       <div class="axis" aria-hidden="true">
         <span>${this.time(this.from)}</span><span>${this.time(this.to)}</span>
@@ -212,6 +244,7 @@ export class YvzTimeline extends LitElement {
               <time>${this.time(at)}</time>${[
                 temp == null ? "" : this.fmt(temp),
                 set == null ? "" : `→ ${this.fmt(set)}`,
+                out == null ? "" : `${this.outdoorLabel} ${this.fmt(out)}`.trim(),
                 running ? "●" : "",
               ]
                 .filter(Boolean)

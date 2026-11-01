@@ -2,6 +2,22 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.12.0 — 2026-11-02
+
+### Added
+
+- Heating stats, events: who did it. A change shows the person's name ("Mode: Off · Muzaffer"), found from the logbook's user and the `person.*` entities (the user list needs an admin, so it isn't read). A change made by an automation or script shows "Auto", with the automation's name as a tooltip; a change with no known origin shows nothing. If the logbook is empty or unavailable the events look as before. `show_user: false` turns the names off and skips the logbook call.
+- Heating stats, events: changes to the target, comfort, eco and frost temperatures are listed ("Target 17.5° · Yasin"). Presses by the same person on the same helper at most 2 minutes apart become one event with the final value. `target_events: false` turns them off; the helpers are the `target`, `comfort`, `eco` and `frost_temp` options. "Show more" opens the last 20 events.
+- Heating stats, events: three or more pump runs under 5 minutes within an hour of each other show as one "Short cycling" warning.
+- Heating stats, `outdoor` option (opt-in): a faint outdoor line on the run timeline with its own scale, the outdoor temperature under each daily bar, and an Efficiency section with degree-days (base 18°) and pump hours per degree-day for the period and for the season (`season_start`, default `10-01`, long-term statistics with a fallback to history). Too mild a period shows a dash.
+- Heating stats: "Time at target" (not for 30 days), the humidity of each room under its name (found through the device, warning colour from 65 %), average minutes per start in the season line, and the coldest and warmest room under the average temperature.
+
+### Changed
+
+- Heating stats: the average temperature tile now says which room it is ("Avg. · Hoofdslaapkamer", "+1" when the leading room changed in the period). It is the leading room, not a house average.
+- Heating stats: a day the pump didn't run shows a dotted baseline and "off" instead of a flat bar.
+- Heating stats: events no longer repeat when only an attribute of the mode changed.
+
 ## 0.11.4 — 2026-11-01
 
 ### Fixed
