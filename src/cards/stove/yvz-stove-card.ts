@@ -12,6 +12,7 @@ import { registerCard } from "../../shared/register-card";
 import { TickController } from "../../shared/tick-controller";
 import type { HassEntity, HomeAssistant, LovelaceCardConfig } from "../../shared/types";
 import { YvzCard } from "../../shared/yvz-card";
+import { directionOf, powerPhase, POWER_LOCK_MS, type PowerPhase, type PowerSent } from "./power-lock";
 import { analyse, minutes, segmentsOf, type RunInfo } from "./runs";
 import "./yvz-stove-card-editor";
 import {
@@ -26,7 +27,7 @@ import {
 
 const UNAVAILABLE = ["unavailable", "unknown"];
 const DEFAULT_ROLES: Record<string, YvzState> = { on: "on", off: "off" };
-// The first tap on a burning stove arms the button; it disarms again after this long.
+// The first tap on power arms the button; it disarms again after this long.
 const ARM_MS = 3000;
 // How long "Warmer verstuurd" stays in the status line.
 const SENT_MS = 3000;
@@ -47,10 +48,14 @@ interface Sent {
 export class YvzStoveCard extends YvzCard<StoveCardConfig> {
   @state() private armed = false;
   @state() private sent?: Sent;
+  @state() private powerSent?: PowerSent;
   @state() private runs?: RunInfo;
   @state() private mismatch = false;
 
   private armTimer?: ReturnType<typeof setTimeout>;
+  private waitTimer?: ReturnType<typeof setTimeout>;
+  // The last_triggered of the power script that was given up on because the stove reacted.
+  private released = "";
   private sentTimer?: ReturnType<typeof setTimeout>;
   private lastSent: Partial<Record<StoveAction, number>> = {};
   private loadedFor = "";
@@ -88,8 +93,9 @@ export class YvzStoveCard extends YvzCard<StoveCardConfig> {
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
-    clearTimeout(this.armTimer);
+    this.disarm();
     clearTimeout(this.sentTimer);
+    clearTimeout(this.waitTimer);
   }
 
   /* ---------- state ---------- */
@@ -122,6 +128,7 @@ export class YvzStoveCard extends YvzCard<StoveCardConfig> {
     if (!this.config || !this.hass) return;
     const status = this.statusEntity();
     const role = this.stateRole(status);
+    this.settlePower();
 
     // The ignition lines come from the status history; refetch when the status changes or now and then.
     if (this.config.status && status && !this.loading) {
@@ -138,6 +145,40 @@ export class YvzStoveCard extends YvzCard<StoveCardConfig> {
       return;
     }
     if (!this.checking && Date.now() - this.checkedAt > MISMATCH_CHECK_MS) void this.confirmMismatch(role);
+  }
+
+  // The script's own last run is shared with every other dashboard and survives a reload.
+  private lastTriggered(): { at: number; raw: string } | undefined {
+    const id = this.config?.actions?.power;
+    const raw = id ? this.hass?.states[id]?.attributes.last_triggered : undefined;
+    const at = typeof raw === "string" ? Date.parse(raw) : NaN;
+    return Number.isNaN(at) ? undefined : { at, raw: raw as string };
+  }
+
+  private powerState(): { phase: PowerPhase; reacted: boolean; raw: string } {
+    const triggered = this.lastTriggered();
+    const ignored = triggered?.raw === this.released;
+    const state = powerPhase(
+      this.powerSent,
+      ignored ? undefined : triggered?.at,
+      this.number(this.config?.power_sensor),
+      Date.now(),
+    );
+    return { ...state, raw: triggered?.raw ?? "" };
+  }
+
+  // Lets go of the lock as soon as the stove has visibly answered, and re-renders when it runs out.
+  private settlePower(): void {
+    const { phase, reacted, raw } = this.powerState();
+    if (reacted) {
+      this.released = raw;
+      this.powerSent = undefined;
+    }
+    clearTimeout(this.waitTimer);
+    if (phase === "waiting") {
+      const since = Math.max(this.powerSent?.at ?? 0, Math.min(this.lastTriggered()?.at ?? 0, Date.now()));
+      this.waitTimer = setTimeout(() => this.requestUpdate(), Math.max(since + POWER_LOCK_MS - Date.now(), 0) + 100);
+    }
   }
 
   private suspicious(role: YvzState, watts: number): boolean {
@@ -198,9 +239,15 @@ export class YvzStoveCard extends YvzCard<StoveCardConfig> {
     const entity = this.config?.actions?.power;
     if (!this.hass || !entity) return;
     const hass = this.hass;
-    const role = this.stateRole(this.statusEntity());
-    // A stove that is burning or starting up needs a second tap, so a stray touch can't put it out.
-    if ((role === "on" || role === "pending") && !this.armed) {
+    const button = event.currentTarget as HTMLElement & { status: "idle"; nudge(): void };
+    // The command is on its way and the stove hasn't answered yet; a second one would undo the first.
+    if (this.powerState().phase === "waiting") {
+      haptic("warning");
+      button.nudge();
+      return;
+    }
+    // Both ways need a second tap: a stray touch shouldn't put the fire out, nor start a whole ignition.
+    if (!this.armed) {
       haptic("warning");
       this.armed = true;
       clearTimeout(this.armTimer);
@@ -208,9 +255,16 @@ export class YvzStoveCard extends YvzCard<StoveCardConfig> {
       return;
     }
     this.disarm();
-    if (this.lock("power")) return;
     haptic("medium");
-    await runAction(event.currentTarget as HTMLElement & { status: "idle" }, () => triggerEntity(hass, entity));
+    // Locked before the call goes out: on a slow connection further taps must not send it again.
+    const sent: PowerSent = {
+      direction: directionOf(this.stateRole(this.statusEntity())),
+      watts: this.number(this.config?.power_sensor),
+      at: Date.now(),
+    };
+    this.powerSent = sent;
+    const ok = await runAction(button, () => triggerEntity(hass, entity));
+    if (!ok && this.powerSent === sent) this.powerSent = undefined;
   }
 
   private async onStep(event: Event, key: StoveAction): Promise<void> {
@@ -235,9 +289,23 @@ export class YvzStoveCard extends YvzCard<StoveCardConfig> {
     return `${day} ${formatTime(hass, at)}`;
   }
 
+  // The power command is a blind toggle, so without a known status it can't say which way it will go.
+  private armedKey(role: YvzState): TranslationKey {
+    if (role === "on" || role === "pending") return "stove.armed_off";
+    return role === "off" ? "stove.armed_on" : "stove.armed_unknown";
+  }
+
   private statusLine(status: HassEntity | undefined, role: YvzState): TemplateResult | string {
     const t = this.t;
-    if (this.armed) return t("stove.armed_off");
+    if (this.armed) return t(this.armedKey(role));
+    const watts = this.number(this.config?.power_sensor);
+    const wattsText = watts === undefined ? "" : `${formatNumber(this.hass!, Math.round(watts))} W`;
+    // The draw comes first: it is what shows the stove reacting, and the end of a long line is what gets cut off.
+    const phase = this.powerState().phase;
+    if (phase === "waiting") return [wattsText, t("stove.power_sent")].filter(Boolean).join(" · ");
+    if (phase === "unanswered") {
+      return html`<ha-icon icon="mdi:alert-outline"></ha-icon>${[wattsText, t("stove.no_reaction")].filter(Boolean).join(" · ")}`;
+    }
     if (this.sent) {
       return this.sent.failed
         ? t("stove.send_failed")
@@ -247,8 +315,10 @@ export class YvzStoveCard extends YvzCard<StoveCardConfig> {
     const text = this.hass!.formatEntityState?.(status) ?? status.state;
     if (role === "error") return this.runs?.failedIgnition ? `${text} · ${t("stove.failed_ignition")}` : text;
     if (role === "pending" || role === "on" || role === "standby") {
-      return `${text} · ${formatDuration(t, Date.now() - Date.parse(status.last_changed))}`;
+      return [text, formatDuration(t, Date.now() - Date.parse(status.last_changed)), wattsText].filter(Boolean).join(" · ");
     }
+    // Off but still drawing power (a cooling fan, say) is worth seeing.
+    if (watts !== undefined && watts > (this.config?.power_threshold ?? DEFAULT_POWER_THRESHOLD)) return `${text} · ${wattsText}`;
     return text;
   }
 
@@ -367,7 +437,10 @@ export class YvzStoveCard extends YvzCard<StoveCardConfig> {
       .size=${size}
       .icon=${icon}
       .label=${this.t("stove.power")}
+      .confirmLabel=${this.t("common.confirm")}
+      .duration=${ARM_MS}
       ?armed=${this.armed}
+      ?waiting=${this.powerState().phase === "waiting"}
       @click=${this.onPower}
     ></yvz-power-button>`;
   }
@@ -381,7 +454,7 @@ export class YvzStoveCard extends YvzCard<StoveCardConfig> {
     const line = this.statusLine(status, role);
 
     const head = html`<p class="name">${name}</p>
-      <p class="status"><span class="dot"></span><span class="text">${line}</span></p>`;
+      <p class="status" aria-live="polite"><span class="dot"></span><span class="text">${line}</span></p>`;
 
     if (this.config.compact) {
       return html`<ha-card data-state=${role} class="compact">
@@ -457,14 +530,19 @@ export class YvzStoveCard extends YvzCard<StoveCardConfig> {
         line-height: var(--yvz-line-label);
       }
 
+      /* A block, not a flex box: text-overflow only draws its "…" on a block. */
       .status .text {
-        display: inline-flex;
-        align-items: center;
-        gap: var(--yvz-space-1);
+        display: block;
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+
+      .status .text ha-icon {
+        --mdc-icon-size: 1.1em;
+        margin-inline-end: var(--yvz-space-1);
+        vertical-align: -0.2em;
       }
 
       .dot {

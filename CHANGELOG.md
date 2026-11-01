@@ -2,6 +2,19 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.11.4 — 2026-11-01
+
+### Fixed
+
+- Stove card: the power button can no longer be pressed twice by accident. The power command is a blind IR toggle and the stove can take up to about 20 seconds to show it got it, so after the second tap the button now spins and stays locked for 30 seconds ("Sent · waiting for the stove…"). The lock is set before the command goes out, so slow connections can't slip a second one through. It follows the power script's own `last_triggered`, so it survives a reload and also holds when the script was run from another dashboard or an automation. Taps in that time only shake the button (a short dim with reduced motion).
+- Stove card: after a turn-on the lock ends early when the draw jumps by 100 W or more (an ignition does that within seconds). A turn-off always gets the full lock, because the cooling fan makes the draw rise and a monitor automation may flip the status at once. If a turn-on gets no answer, the line says "No reaction · check the stove" for three minutes and the button can be used again.
+- Stove card: it is clear again whether you tapped power. The first tap turns the button into "Sure?" with a ring that drains over 3 seconds and a small pulse. The squircle button had lost this in 0.8.0.
+- Stove card: the live wattage is back in the status line ("Burning · 12 min · 340 W"), also when the stove is off but still draws more than the off-threshold. While a command is pending the wattage comes first, so a long text never hides it. A long status line now ends in "…" in the compact layout, and the line is announced to screen readers.
+
+### Changed
+
+- Stove card: switching on needs a second tap too, as switching off does, because the IR code is a blind toggle. With an unknown status the line says "Tap again to send power".
+
 ## 0.11.3 — 2026-10-28
 
 ### Fixed
