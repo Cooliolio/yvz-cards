@@ -2,6 +2,12 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.12.1 — 2026-11-02
+
+### Fixed
+
+- Heating stats: the run timeline no longer grows without limit in a tall panel. It still fills spare height, but stops at 260 px.
+
 ## 0.12.0 — 2026-11-02
 
 ### Added

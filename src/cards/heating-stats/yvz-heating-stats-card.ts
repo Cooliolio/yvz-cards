@@ -36,6 +36,8 @@ const EVENTS_NARROW = 5;
 const EVENTS_WIDE = 8;
 // A day only counts towards the average when the recorder has history for it, and the average needs a few of them.
 const MIN_DAYS_FOR_AVERAGE = 3;
+// The run chart fills spare height in a panel, but never grows taller than this.
+const MAX_PLOT_PX = 260;
 const ARM_MS = 3000;
 // The season figures cover months of history, so they are fetched far less often than the rest.
 const SEASON_REFRESH_MS = 30 * 60_000;
@@ -139,7 +141,7 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
   private measure(): void {
     this.wide = this.clientWidth >= WIDE_PX;
     const height = this.plot?.clientHeight ?? 0;
-    if (height > 0) this.plotHeight = Math.max(120, Math.round(height - 18));
+    if (height > 0) this.plotHeight = Math.min(MAX_PLOT_PX, Math.max(120, Math.round(height - 18)));
   }
 
   protected override updated(): void {
@@ -762,6 +764,8 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
       /* the run chart takes the spare height of the card; the chart fills its box */
       .plot-section {
         flex: 1 1 auto;
+        /* the chart box plus the title above it */
+        max-height: ${MAX_PLOT_PX + 48}px;
       }
 
       .plot {
