@@ -1,6 +1,7 @@
 import { css, html, nothing, type CSSResultGroup, type TemplateResult } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
 import "../../design";
+import { initialOf, NEUTRAL, userColors, type Pin } from "../../design/pins";
 import type { Bar, SegmentOption, StatTrend } from "../../design";
 import { formatDuration, formatNumber, formatTime } from "../../shared/format";
 import { haptic } from "../../shared/haptic";
@@ -9,11 +10,12 @@ import { registerCard } from "../../shared/register-card";
 import { TickController } from "../../shared/tick-controller";
 import type { LovelaceCardConfig } from "../../shared/types";
 import { YvzCard } from "../../shared/yvz-card";
-import { HUMIDITY_WARN, hoursPerDegreeDay, seasonStart } from "./efficiency";
+import { AT_TARGET_TOLERANCE, HUMIDITY_WARN, hoursPerDegreeDay, seasonStart } from "./efficiency";
 import { personNames } from "./events";
 import { humidityOf } from "./humidity";
-import { DAY, HOUR, loadStats, type StatsData, type StatsEntities, type Totals } from "./history";
+import { DAY, HOUR, loadStats, MAX_EVENTS, type StatsData, type StatsEntities, type Totals } from "./history";
 import { loadSeason, type Season } from "./season";
+import { ACCENT_TILES, tileColumns, tilesFor, type TileKey } from "./tiles";
 import "./yvz-heating-stats-card-editor";
 import {
   PERIODS,
@@ -37,7 +39,7 @@ const EVENTS_WIDE = 8;
 // A day only counts towards the average when the recorder has history for it, and the average needs a few of them.
 const MIN_DAYS_FOR_AVERAGE = 3;
 // The run chart fills spare height in a panel, but never grows taller than this.
-const MAX_PLOT_PX = 260;
+const MAX_PLOT_PX = 300;
 const ARM_MS = 3000;
 // The season figures cover months of history, so they are fetched far less often than the rest.
 const SEASON_REFRESH_MS = 30 * 60_000;
@@ -64,6 +66,15 @@ function loadPeriod(config: HeatingStatsConfig): Period {
   return config.period && PERIODS.includes(config.period) ? config.period : "today";
 }
 
+interface Figure {
+  label: string;
+  value: string;
+  delta?: string;
+  trend?: StatTrend;
+  note?: string;
+  title?: string;
+}
+
 interface Comparison {
   before: Totals;
   runtimeBefore: number;
@@ -80,17 +91,19 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
   @state() private data?: StatsData;
   @state() private plotHeight = 140;
   @state() private wide = false;
+  @state() private kpiWidth = 0;
   @state() private eventsExpanded = false;
   @state() private season?: Season;
   // The room waiting for its second tap before it becomes the leading one.
   @state() private armedRoom?: string;
   @query(".plot") private plot?: HTMLElement;
+  @query(".kpis") private kpis?: HTMLElement;
 
   private cache = new Map<Period, StatsData>();
   private loading = false;
   private lastFetch = 0;
   private observer?: ResizeObserver;
-  private watched?: Element;
+  private watched: Element[] = [];
   private seasonKey = "";
   private seasonAt = 0;
   private seasonLoading = false;
@@ -133,23 +146,26 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this.observer?.disconnect();
-    this.watched = undefined;
+    this.watched = [];
     clearTimeout(this.armTimer);
   }
 
   // The card's own width decides one or two columns and how many events fit; the run chart takes the spare height.
   private measure(): void {
     this.wide = this.clientWidth >= WIDE_PX;
+    const kpis = this.kpis?.clientWidth ?? 0;
+    if (kpis > 0 && kpis !== this.kpiWidth) this.kpiWidth = kpis;
     const height = this.plot?.clientHeight ?? 0;
     if (height > 0) this.plotHeight = Math.min(MAX_PLOT_PX, Math.max(120, Math.round(height - 18)));
   }
 
   protected override updated(): void {
-    const plot = this.plot;
-    if (plot === this.watched) return;
-    if (this.watched) this.observer?.unobserve(this.watched);
-    this.watched = plot ?? undefined;
-    if (plot) this.observer?.observe(plot);
+    const next = [this.plot, this.kpis].filter((e): e is HTMLElement => !!e);
+    if (next.length === this.watched.length && next.every((e, i) => e === this.watched[i])) return;
+    this.watched.forEach((e) => this.observer?.unobserve(e));
+    this.watched = next;
+    next.forEach((e) => this.observer?.observe(e));
+    this.measure();
   }
 
   /* ---------- entities ---------- */
@@ -319,7 +335,9 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
 
   /* ---------- render pieces ---------- */
 
-  private renderTiles(d: StatsData, c: Comparison): TemplateResult {
+  // The first four key figures. `names` puts the coldest and warmest room's name in the tile; the wide strip
+  // leaves them for the tooltip and shows the temperatures only.
+  private baseFigures(d: StatsData, c: Comparison, names: boolean): Record<"runtime" | "starts" | "longest" | "avg", Figure> {
     const t = this.t;
     const hass = this.hass!;
     const runtime = this.longTerm(`runtime_${this.period}` as StatsLongTermKey) ?? d.runtime;
@@ -338,7 +356,7 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
     // The tile is the leading room, not the house: say which room, and show how far the others are from it.
     const leaders = d.leaders;
     const lead = leaders?.main ?? hass.states[this.entityId("leading")]?.state;
-    const avgLabel = !lead
+    const label = !lead
       ? t("hstats.avg_temp")
       : leaders && leaders.others > 0
         ? t("hstats.avg_rooms_more", { room: lead, count: leaders.others })
@@ -347,50 +365,174 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
     const cold = known.length > 1 ? known.reduce((a, b) => (b.current! < a.current! ? b : a)) : undefined;
     const warm = known.length > 1 ? known.reduce((a, b) => (b.current! > a.current! ? b : a)) : undefined;
     const spread = cold && warm && cold.current !== warm.current ? { cold: `${cold.name} ${this.temp(cold.current)}`, warm: `${warm.name} ${this.temp(warm.current)}` } : undefined;
-    const avgTitle = [leaders && leaders.others > 0 ? t("hstats.avg_room_title") : t("hstats.avg_room_only"), spread ? t("hstats.spread_title", spread) : ""]
+    const title = [leaders && leaders.others > 0 ? t("hstats.avg_room_title") : t("hstats.avg_room_only"), spread ? t("hstats.spread_title", spread) : ""]
       .filter(Boolean)
       .join(" ");
+    const spreadNote = !spread ? "" : names ? t("hstats.spread", spread) : `${this.temp(cold!.current)} – ${this.temp(warm!.current)}`;
 
-    return html`<div class="tiles">
-      <yvz-stat
-        .label=${t("hstats.runtime")}
-        .value=${this.duration(runtime)}
-        .delta=${c.available ? rt.delta : ""}
-        .trend=${rt.trend}
-        .note=${duty == null ? "" : t("hstats.duty", { percent: formatNumber(hass, duty) })}
-      ></yvz-stat>
-      <yvz-stat
-        .label=${t("hstats.starts")}
-        .value=${formatNumber(hass, starts)}
-        .delta=${c.available && startsDiff !== 0 ? formatNumber(hass, Math.abs(startsDiff)) : ""}
-        .trend=${this.trendOf(startsDiff)}
-      ></yvz-stat>
-      <yvz-stat
-        title=${avgTitle}
-        .label=${avgLabel}
-        .note=${spread ? t("hstats.spread", spread) : ""}
-        .value=${d.avgTemp == null ? "–" : this.temp(d.avgTemp)}
-        .delta=${tempDiff != null && Math.abs(tempDiff) >= FLAT ? this.temp(Math.abs(tempDiff)) : ""}
-        .trend=${tempDiff == null ? "flat" : this.trendOf(tempDiff, FLAT)}
-      ></yvz-stat>
-      <yvz-stat
-        .label=${t("hstats.longest")}
-        .value=${d.longest ? this.duration(d.longest) : "–"}
-        .delta=${c.available && d.longest ? lr.delta : ""}
-        .trend=${lr.trend}
-      ></yvz-stat>
+    return {
+      runtime: {
+        label: t("hstats.runtime"),
+        value: this.duration(runtime),
+        delta: c.available ? rt.delta : "",
+        trend: rt.trend,
+        note: duty == null ? "" : t("hstats.duty", { percent: formatNumber(hass, duty) }),
+      },
+      starts: {
+        label: t("hstats.starts"),
+        value: formatNumber(hass, starts),
+        delta: c.available && startsDiff !== 0 ? formatNumber(hass, Math.abs(startsDiff)) : "",
+        trend: this.trendOf(startsDiff),
+      },
+      avg: {
+        label,
+        title,
+        note: spreadNote,
+        value: d.avgTemp == null ? "–" : this.temp(d.avgTemp),
+        delta: tempDiff != null && Math.abs(tempDiff) >= FLAT ? this.temp(Math.abs(tempDiff)) : "",
+        trend: tempDiff == null ? "flat" : this.trendOf(tempDiff, FLAT),
+      },
+      longest: {
+        label: t("hstats.longest"),
+        value: d.longest ? this.duration(d.longest) : "–",
+        delta: c.available && d.longest ? lr.delta : "",
+        trend: lr.trend,
+      },
+    };
+  }
+
+  // The figures from outside data and the thermostat; each is undefined when its data is missing.
+  private extraFigures(d: StatsData): Partial<Record<TileKey, Figure>> {
+    const t = this.t;
+    const hass = this.hass!;
+    const out: Partial<Record<TileKey, Figure>> = {};
+    const hours = (h: number) => t("common.hours_short", { count: formatNumber(hass, h, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) });
+
+    if (this.config?.outdoor && d.degreeDays !== undefined) {
+      out.degree_days = {
+        label: t("hstats.degree_days"),
+        value: formatNumber(hass, d.degreeDays, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+        note: t("hstats.dd_note", { base: 18 }),
+      };
+      const now = hoursPerDegreeDay(d.runtime, d.degreeDays);
+      const season = this.season;
+      const seasonHours = season ? hoursPerDegreeDay(season.pumpMs, season.degreeDays) : undefined;
+      out.per_degree_day = {
+        label: t("hstats.per_degree_day"),
+        value: now === undefined ? "–" : hours(now),
+        note: [
+          now === undefined ? t("hstats.too_mild_short") : "",
+          seasonHours === undefined ? "" : t("hstats.season_pdd", { value: hours(seasonHours) }),
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        title: [
+          now === undefined ? t("hstats.too_mild") : "",
+          season ? t("hstats.since", { date: new Intl.DateTimeFormat(this.language, { day: "numeric", month: "short" }).format(season.from) }) : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      };
+    }
+    if (d.atTarget !== undefined) {
+      out.at_target = {
+        label: t("hstats.at_target"),
+        value: `${formatNumber(hass, Math.round(d.atTarget * 100))} %`,
+        note: t("hstats.at_target_note", { tolerance: formatNumber(hass, AT_TARGET_TOLERANCE, { maximumFractionDigits: 1 }) }),
+        title: t("hstats.at_target_title"),
+      };
+    }
+    if (d.heatingRate !== undefined) {
+      const climate = hass.states[this.entityId("climate")];
+      const setpoint = Number(climate?.attributes.temperature);
+      const current = parseFloat(hass.states[this.entityId("control")]?.state ?? "");
+      const trend = parseFloat(hass.states[this.entityId("trend")]?.state ?? "");
+      const gap = setpoint - current;
+      const heating = hass.states[this.entityId("pump")]?.state === "on";
+      // Only an estimate while the room is actually warming towards its target.
+      const eta = heating && gap > 0.1 && trend > 0 ? Math.round((gap / trend) * 60) : undefined;
+      const w = d.lastWarmUp;
+      out.rate = {
+        label: t("hstats.heating_rate"),
+        value: `${formatNumber(hass, d.heatingRate, { maximumFractionDigits: 1 })} °/h`,
+        note: [
+          w ? t("hstats.warmup_note", { from: this.temp(w.from), to: this.temp(w.to), minutes: t("common.minutes_short", { count: w.minutes }) }) : "",
+          eta == null ? "" : t("hstats.eta_note", { minutes: t("common.minutes_short", { count: eta }) }),
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      };
+    }
+    return out;
+  }
+
+  private stat(f: Figure, extra: { accent?: boolean; wrap?: boolean } = {}): TemplateResult {
+    return html`<yvz-stat
+      title=${f.title || nothing}
+      .label=${f.label}
+      .value=${f.value}
+      .delta=${f.delta ?? ""}
+      .trend=${f.trend ?? "flat"}
+      .note=${f.note ?? ""}
+      ?accent=${extra.accent}
+      ?wrap=${extra.wrap}
+    ></yvz-stat>`;
+  }
+
+  // The compact layout's four tiles, as they have always been.
+  private renderTiles(d: StatsData, c: Comparison): TemplateResult {
+    const f = this.baseFigures(d, c, true);
+    return html`<div class="tiles">${this.stat(f.runtime)} ${this.stat(f.starts)} ${this.stat(f.avg)} ${this.stat(f.longest)}</div>`;
+  }
+
+  // The wide layout's strip: up to eight tiles, only those whose data exists, in columns that fill evenly.
+  private renderKpis(d: StatsData, c: Comparison): TemplateResult {
+    const base = this.baseFigures(d, c, false);
+    const extra = this.extraFigures(d);
+    const keys = tilesFor({ outdoor: !!this.config?.outdoor, degreeDays: d.degreeDays, atTarget: d.atTarget, heatingRate: d.heatingRate });
+    const cols = tileColumns(keys.length, this.kpiWidth || 1000);
+    return html`<div class="kpis" style="grid-template-columns: repeat(${cols}, minmax(0, 1fr))">
+      ${keys.map((key) => {
+        const figure = key in base ? base[key as keyof typeof base] : extra[key];
+        return figure ? this.stat(figure, { accent: ACCENT_TILES.includes(key), wrap: true }) : nothing;
+      })}
     </div>`;
+  }
+
+  // Every change a person or an automation made inside the window, as timeline pins.
+  private pinsOf(d: StatsData): Pin[] {
+    if (this.config?.show_user === false) return [];
+    const t = this.t;
+    const names = personNames(this.hass!.states);
+    const colors = userColors([...names.keys(), ...d.events.flatMap((e) => (e.userId ? [e.userId] : []))]);
+    return d.events
+      .filter((e) => (e.kind === "mode" || e.kind === "target") && (e.userId || e.auto !== undefined))
+      .map((e, i) => {
+        const name = e.userId ? names.get(e.userId) : undefined;
+        const auto = e.userId ? undefined : e.auto;
+        return {
+          id: `${e.t}:${e.entity ?? e.key}:${i}`,
+          t: e.t,
+          text: this.eventText(e),
+          who: e.userId ? (name ?? t("hstats.unknown_user")) : auto ? t("hstats.auto_by", { name: auto }) : t("hstats.auto"),
+          when: this.when(e.t),
+          initial: e.userId ? (name ? initialOf(name) : "?") : initialOf(t("hstats.auto")),
+          color: e.userId && name ? (colors.get(e.userId) ?? NEUTRAL) : NEUTRAL,
+        };
+      });
   }
 
   private renderTimeline(d: StatsData): TemplateResult {
     const t = this.t;
-    return html`<section class="plot-section">
+    const pins = this.pinsOf(d);
+    return html`<section class="plot-section panel">
       <yvz-section-title>
         ${t("hstats.timeline")}
         <span slot="end" class="legend">
           <i class="swatch run"></i>${t("hstats.legend_pump")}<i class="swatch line"></i>${t("hstats.legend_temp")}
           ${d.setpoint.length ? html`<i class="swatch dash"></i>${t("hstats.legend_setpoint")}` : nothing}
           ${d.outdoor.length ? html`<i class="swatch out"></i>${t("hstats.outside")}` : nothing}
+          ${pins.length ? html`<i class="swatch who"></i>${t("hstats.who_legend")}` : nothing}
         </span>
       </yvz-section-title>
       <div class="plot">
@@ -401,6 +543,9 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
           .setpoint=${d.setpoint}
           .outdoor=${d.outdoor}
           outdoor-label=${t("hstats.outside")}
+          .pins=${pins}
+          pins-label=${t("hstats.who_legend")}
+          .clusterText=${(count: number, until: number) => t("hstats.pin_cluster", { count, time: formatTime(this.hass!, until) })}
           .temperature=${d.temperature}
           .height=${this.plotHeight}
           .locale=${this.language}
@@ -409,7 +554,7 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
     </section>`;
   }
 
-  private renderDays(d: StatsData): TemplateResult {
+  private renderDays(d: StatsData, panel = false): TemplateResult {
     const t = this.t;
     const month = this.period === "month";
     const last = d.days.length - 1;
@@ -435,10 +580,12 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
     const finished = d.days.slice(0, -1);
     const counted = finished.slice(finished.length - d.finishedWithData);
     const average = d.finishedWithData >= MIN_DAYS_FOR_AVERAGE ? counted.reduce((n, x) => n + x.runtime, 0) / counted.length : 0;
-    return html`<section>
-      <yvz-section-title>
+    // The wide layout puts the season next to the daily average; the compact one keeps it on a line below.
+    const end = [average > 0 ? t("hstats.per_day", { time: this.duration(average) }) : "", panel ? this.seasonText() : ""].filter(Boolean).join(" · ");
+    return html`<section class=${panel ? "panel" : nothing}>
+      <yvz-section-title class="wrap">
         ${t("hstats.daily")}
-        <span slot="end">${average > 0 ? t("hstats.per_day", { time: this.duration(average) }) : ""}</span>
+        <span slot="end">${end}</span>
       </yvz-section-title>
       <yvz-bars
         class="days"
@@ -449,8 +596,8 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
     </section>`;
   }
 
-  // The season sensors, when they exist: "Season: 142 h, 85 starts".
-  private renderSeason(): TemplateResult | typeof nothing {
+  // The season sensors, when they exist: "Season: 142 h, 85 starts, 6 min per start".
+  private seasonText(): string {
     const t = this.t;
     const runtime = this.longTerm("runtime_season");
     const starts = this.longTerm("starts_season");
@@ -460,8 +607,12 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
       starts == null ? null : t("hstats.season_starts", { count: formatNumber(this.hass!, Math.round(starts)) }),
       perStart == null ? null : t("hstats.season_per_start", { minutes: formatNumber(this.hass!, perStart) }),
     ].filter(Boolean);
-    if (!parts.length) return nothing;
-    return html`<p class="season">${t("hstats.season")}: ${parts.join(", ")}</p>`;
+    return parts.length ? `${t("hstats.season")}: ${parts.join(", ")}` : "";
+  }
+
+  private renderSeason(): TemplateResult | typeof nothing {
+    const text = this.seasonText();
+    return text ? html`<p class="season">${text}</p>` : nothing;
   }
 
   private onRoom(name: string, lead: string | undefined): void {
@@ -488,7 +639,7 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
     const known = rows.filter((r) => r.current != null);
     const coldest = known.length > 1 ? known.reduce((a, b) => (b.current! < a.current! ? b : a)).name : undefined;
     const gap = new Intl.NumberFormat(this.language, { signDisplay: "exceptZero", minimumFractionDigits: 1, maximumFractionDigits: 1 });
-    return html`<section>
+    return html`<section class="panel">
       <yvz-section-title>${t("hstats.rooms")}</yvz-section-title>
       ${rows.length
         ? html`<div class="rooms">
@@ -536,61 +687,6 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
     </section>`;
   }
 
-  private renderWarmUp(d: StatsData): TemplateResult {
-    const t = this.t;
-    const climate = this.hass!.states[this.entityId("climate")];
-    const setpoint = Number(climate?.attributes.temperature);
-    const current = parseFloat(this.hass!.states[this.entityId("control")]?.state ?? "");
-    const trend = parseFloat(this.hass!.states[this.entityId("trend")]?.state ?? "");
-    const gap = setpoint - current;
-    const heating = this.hass!.states[this.entityId("pump")]?.state === "on";
-    // Only an estimate while the room is actually warming towards its target.
-    const eta = heating && gap > 0.1 && trend > 0 ? Math.round((gap / trend) * 60) : undefined;
-    const row = (label: string, value: string) => html`<yvz-setting-row .label=${label}><span class="value">${value}</span></yvz-setting-row>`;
-    const w = d.lastWarmUp;
-    return html`<section>
-      <yvz-section-title>${t("hstats.warmup")}</yvz-section-title>
-      ${row(t("hstats.rate"), d.heatingRate == null ? "–" : `${formatNumber(this.hass!, d.heatingRate, { maximumFractionDigits: 1 })} °/h`)}
-      ${row(
-        t("hstats.last_warmup"),
-        w ? `${this.temp(w.from)} → ${this.temp(w.to)} · ${t("common.minutes_short", { count: w.minutes })}` : "–",
-      )}
-      ${eta == null ? nothing : row(t("hstats.eta"), t("common.minutes_short", { count: eta }))}
-    </section>`;
-  }
-
-  private renderEfficiency(d: StatsData): TemplateResult | typeof nothing {
-    const t = this.t;
-    const hass = this.hass!;
-    const row = (label: string, value: string, title = "") =>
-      html`<yvz-setting-row .label=${label}><span class="value" title=${title || nothing}>${value}</span></yvz-setting-row>`;
-    const perDay = (ms: number, days: number | undefined): string => {
-      const hours = hoursPerDegreeDay(ms, days);
-      return hours === undefined ? "–" : t("common.hours_short", { count: formatNumber(hass, hours, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) });
-    };
-    const mild = (days: number | undefined) => (days !== undefined && hoursPerDegreeDay(1, days) === undefined ? t("hstats.too_mild") : "");
-    const rows: TemplateResult[] = [];
-    if (this.config?.outdoor && d.degreeDays !== undefined) {
-      rows.push(
-        row(t("hstats.degree_days"), formatNumber(hass, d.degreeDays, { minimumFractionDigits: 1, maximumFractionDigits: 1 })),
-        row(t("hstats.per_degree_day"), perDay(d.runtime, d.degreeDays), mild(d.degreeDays)),
-      );
-    }
-    const season = this.config?.outdoor ? this.season : undefined;
-    if (season) {
-      const since = t("hstats.since", { date: new Intl.DateTimeFormat(this.language, { day: "numeric", month: "short" }).format(season.from) });
-      rows.push(row(t("hstats.per_degree_day_season"), perDay(season.pumpMs, season.degreeDays), [since, mild(season.degreeDays)].filter(Boolean).join(" · ")));
-    }
-    if (d.atTarget !== undefined) {
-      rows.push(row(t("hstats.at_target"), `${formatNumber(hass, Math.round(d.atTarget * 100))} %`, t("hstats.at_target_title")));
-    }
-    if (!rows.length) return nothing;
-    return html`<section>
-      <yvz-section-title>${t("hstats.efficiency")}</yvz-section-title>
-      ${rows}
-    </section>`;
-  }
-
   // Who or what made the change, as short text for the line and the longer text for its tooltip.
   private origin(e: StatsData["events"][number], names: Map<string, string>): { short: string; long: string } {
     if (this.config?.show_user === false) return { short: "", long: "" };
@@ -603,27 +699,30 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
     return { short: "", long: "" };
   }
 
+  // What happened, without who.
+  private eventText(e: StatsData["events"][number]): string {
+    const t = this.t;
+    if (e.kind === "warning") return t(`hstats.event.${e.key}` as TranslationKey);
+    if (e.kind === "run") return e.key === "short" ? t("hstats.event.short", { count: e.count ?? 0 }) : t("hstats.event.run", { time: this.duration(e.ms ?? 0) });
+    if (e.kind === "target") return t(`hstats.event.set_${e.key}` as TranslationKey, { value: this.temp(e.value) });
+    return t("hstats.mode_to", { mode: MODE_KEYS[e.key] ? t(MODE_KEYS[e.key]) : e.key });
+  }
+
   private renderEvents(d: StatsData): TemplateResult {
     const t = this.t;
     const limit = this.wide ? EVENTS_WIDE : EVENTS_NARROW;
-    const events = this.eventsExpanded ? d.events : d.events.slice(0, limit);
+    // The data holds every event for the timeline's pins; the list stops at MAX_EVENTS.
+    const all = d.events.slice(0, MAX_EVENTS);
+    const events = this.eventsExpanded ? all : all.slice(0, limit);
     const names = personNames(this.hass!.states);
-    return html`<section>
+    return html`<section class="panel">
       <yvz-section-title>${t("hstats.events")}</yvz-section-title>
       ${events.length
         ? html`<ul class="events">
             ${events.map((e) => {
               // Short-cycling is a warning inside the run row, not a row of its own kind.
               const warning = e.kind === "warning" || e.key === "short";
-              const text = e.kind === "warning"
-                ? t(`hstats.event.${e.key}` as TranslationKey)
-                : e.kind === "run"
-                  ? e.key === "short"
-                    ? t("hstats.event.short", { count: e.count ?? 0 })
-                    : t("hstats.event.run", { time: this.duration(e.ms ?? 0) })
-                  : e.kind === "target"
-                    ? t(`hstats.event.set_${e.key}` as TranslationKey, { value: this.temp(e.value) })
-                    : t("hstats.mode_to", { mode: MODE_KEYS[e.key] ? t(MODE_KEYS[e.key]) : e.key });
+              const text = this.eventText(e);
               const icon = warning
                 ? "mdi:alert-outline"
                 : e.kind === "run"
@@ -640,7 +739,7 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
               </li>`;
             })}
           </ul>
-          ${d.events.length > limit
+          ${all.length > limit
             ? html`<button class="more" aria-expanded=${this.eventsExpanded} @click=${() => (this.eventsExpanded = !this.eventsExpanded)}>
                 ${this.eventsExpanded ? t("hstats.show_less") : t("hstats.show_more")}
               </button>`
@@ -661,17 +760,24 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
     // A new install has little history, so the longer periods are labelled instead of looking wrong.
     const collecting = d && d.periodDays > 0 && d.dataDays < MIN_DAYS_FOR_AVERAGE && !d.empty;
 
+    // On wide cards the period control sits in the header's right-hand corner; below that it goes under it.
+    const inHeader = !compact && this.wide;
+    const periods = html`<yvz-segmented
+      outline
+      class="periods ${inHeader ? "in-header" : ""}"
+      slot=${inHeader ? "end" : nothing}
+      .label=${t("hstats.period")}
+      .options=${options}
+      .value=${this.period}
+      @yvz-select=${(e: CustomEvent<{ value: Period }>) => this.pick(e.detail.value)}
+    ></yvz-segmented>`;
+
     return html`
       <ha-card class=${compact ? "compact" : ""}>
-        <yvz-card-header icon="mdi:chart-line" .heading=${this.config.name ?? t("hstats.default_name")} .subtitle=${subtitle}></yvz-card-header>
-        <yvz-segmented
-          outline
-          class="periods"
-          .label=${t("hstats.period")}
-          .options=${options}
-          .value=${this.period}
-          @yvz-select=${(e: CustomEvent<{ value: Period }>) => this.pick(e.detail.value)}
-        ></yvz-segmented>
+        <yvz-card-header icon="mdi:chart-line" .heading=${this.config.name ?? t("hstats.default_name")} .subtitle=${subtitle}>
+          ${inHeader ? periods : nothing}
+        </yvz-card-header>
+        ${inHeader ? nothing : periods}
         ${!d || !c
           ? html`<p class="hint loading">${t("hstats.loading")}</p>`
           : html`
@@ -684,10 +790,11 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
               <div class="body">
                 ${compact
                   ? html`${this.renderTiles(d, c)} ${this.renderDays(d)} ${this.renderSeason()}`
-                  : html`<div class="col main-col">
-                        ${this.renderTiles(d, c)} ${this.renderTimeline(d)} ${this.renderDays(d)} ${this.renderSeason()}
-                      </div>
-                      <div class="col side-col">${this.renderRooms(d)} ${this.renderWarmUp(d)} ${this.renderEfficiency(d)} ${this.renderEvents(d)}</div>`}
+                  : html`${this.renderKpis(d, c)}
+                      <div class="main">
+                        <div class="col left">${this.renderTimeline(d)} ${this.renderDays(d, true)}</div>
+                        <div class="col right">${this.renderRooms(d)} ${this.renderEvents(d)}</div>
+                      </div>`}
               </div>
             `}
       </ha-card>
@@ -710,6 +817,10 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
         margin-top: var(--yvz-space-3);
       }
 
+      .periods.in-header {
+        margin-top: 0;
+      }
+
       yvz-banner {
         margin-top: var(--yvz-space-3);
       }
@@ -722,11 +833,35 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
         margin-top: var(--yvz-space-4);
       }
 
+      .kpis {
+        display: grid;
+        gap: var(--yvz-space-3);
+      }
+
+      /* the two columns; below 1100 px everything stacks: timeline, daily bars, rooms, events */
+      .main {
+        display: flex;
+        flex: 1 1 auto;
+        flex-direction: column;
+        gap: var(--yvz-space-4);
+        min-width: 0;
+      }
+
       .col {
         display: flex;
         flex-direction: column;
-        gap: var(--yvz-space-5);
+        gap: var(--yvz-space-4);
         min-width: 0;
+      }
+
+      .panel {
+        padding: var(--yvz-space-4) var(--yvz-space-5);
+        border-radius: var(--yvz-radius-md);
+        background: var(--yvz-surface-raised);
+      }
+
+      yvz-section-title.wrap {
+        flex-wrap: wrap;
       }
 
       section {
@@ -764,8 +899,8 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
       /* the run chart takes the spare height of the card; the chart fills its box */
       .plot-section {
         flex: 1 1 auto;
-        /* the chart box plus the title above it */
-        max-height: ${MAX_PLOT_PX + 48}px;
+        /* the chart box, its axis, the panel padding and the title above it */
+        max-height: ${MAX_PLOT_PX + 96}px;
       }
 
       .plot {
@@ -806,6 +941,14 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
       .swatch.out {
         background: var(--yvz-standby, var(--yvz-text-muted));
         opacity: 0.6;
+      }
+
+      .swatch.who {
+        width: 12px;
+        height: 12px;
+        border: 1px solid var(--yvz-text-muted);
+        border-radius: 50%;
+        background: var(--yvz-on);
       }
 
       .swatch.dash {
@@ -1024,11 +1167,15 @@ export class YvzHeatingStatsCard extends YvzCard<HeatingStatsConfig> {
         }
       }
 
-      @container (min-width: 900px) {
-        ha-card:not(.compact) .body {
+      @container (min-width: 1100px) {
+        .main {
           display: grid;
-          grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-          gap: var(--yvz-space-6);
+          grid-template-columns: minmax(0, 1fr) 440px;
+          align-items: stretch;
+        }
+
+        .main .col.left .plot-section {
+          flex: 1 1 auto;
         }
       }
 

@@ -143,7 +143,7 @@ export interface WarmUp {
   minutes: number;
 }
 
-// The card lists this many events at most; it shows fewer until "Show more" is pressed.
+// The card's list shows this many events at most; fewer until "Show more" is pressed.
 export const MAX_EVENTS = 20;
 
 export interface StatsEvent {
@@ -382,7 +382,8 @@ export async function loadStats(
     leaders: leaderMix(leadingMap[ids.leading] ?? [], window.from, now),
     heatingRate: hours > 0 ? rise / hours : undefined,
     lastWarmUp,
-    events: listed.slice(0, MAX_EVENTS),
+    // All of them: the timeline pins every change, and the card cuts the list itself.
+    events: listed,
     empty: !pump.length && !control.length,
     fetchedAt: Date.now(),
     pumpChanged: hass.states[ids.pump]?.last_changed ?? "",

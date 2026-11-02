@@ -15,6 +15,10 @@ export class YvzStat extends LitElement {
   @property() trend: StatTrend = "flat";
   // A quieter line under the change, e.g. a percentage.
   @property() note = "";
+  // A subtle outline, for the figures that come from outside data or the thermostat.
+  @property({ type: Boolean, reflect: true }) accent = false;
+  // Let the note take a second line instead of cutting it off.
+  @property({ type: Boolean, reflect: true }) wrap = false;
 
   static override styles = [
     designStyles,
@@ -25,6 +29,16 @@ export class YvzStat extends LitElement {
         padding: var(--yvz-space-3);
         border-radius: var(--yvz-radius-md);
         background: var(--yvz-surface-raised);
+      }
+
+      :host([accent]) {
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--yvz-accent) 45%, transparent);
+      }
+
+      :host([wrap]) .note {
+        overflow: visible;
+        text-overflow: clip;
+        white-space: normal;
       }
 
       .label {

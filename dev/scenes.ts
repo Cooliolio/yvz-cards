@@ -553,7 +553,7 @@ interface FakeChange {
 
 const SCHEDULE = "Heating schedule";
 
-function fakeChanges(start: number, end: number): FakeChange[] {
+function fakeChanges(start: number, end: number, solo = false): FakeChange[] {
   const mode = "input_select.heating_mode";
   const target = "input_number.heating_target_temp";
   const out: FakeChange[] = [];
@@ -578,9 +578,12 @@ function fakeChanges(start: number, end: number): FakeChange[] {
   // Minutes ago, so Today has something to show whatever time of day the playground is opened.
   out.push({ id: target, t: at(6 * 60_000), state: "21", user: "muzaffer" });
   out.push({ id: "input_number.heating_eco_temp", t: at(3 * 60_000), state: "16.5", user: "yasin" });
+  // Yasin fiddling with the target for a while, so a week of timeline gets a bigger cluster of pins.
+  ["18.5", "19", "19.5", "20", "20.5"].forEach((v, i) => out.push({ id: target, t: at(28 * 3_600_000) + i * 4 * 60_000, state: v, user: "yasin" }));
   out.push({ id: "input_number.heating_eco_temp", t: at(50 * 3_600_000), state: "17.5", user: "yasin" });
   out.push({ id: "input_number.heating_comfort_temp", t: at(70 * 3_600_000), state: "21.5", user: "muzaffer" });
-  return out.filter((c) => c.t > start && c.t < end).sort((a, b) => a.t - b.t);
+  // One person living there: every change by Muzaffer is Yasin's.
+  return out.filter((c) => c.t > start && c.t < end).map((c) => (solo && c.user === "muzaffer" ? { ...c, user: "yasin" as const } : c)).sort((a, b) => a.t - b.t);
 }
 
 // Long-term statistics for the outdoor sensor: one mean per local day, as recorder/statistics_during_period answers.
@@ -613,7 +616,7 @@ function fakeLogbook(message: Record<string, unknown>, v: Record<string, Control
   const end = Date.parse(message.end_time as string);
   const start = Math.max(asked, end - Number(v.dataDays ?? 60) * DAY_MS);
   const ids = new Set(message.entity_ids as string[]);
-  return fakeChanges(start, end)
+  return fakeChanges(start, end, v.users === "one")
     .filter((c) => ids.has(c.id))
     .map((c) => ({
       when: c.t / 1000,
@@ -665,11 +668,11 @@ function fakeHistory(
       }
     } else if (id === "input_select.heating_mode") {
       push(start, "Eco");
-      for (const change of fakeChanges(start, end)) if (change.id === id) push(change.t, change.state);
+      for (const change of fakeChanges(start, end, v.users === "one")) if (change.id === id) push(change.t, change.state);
       items.sort((a, b) => Number(a.lu) - Number(b.lu));
     } else if (id in TARGET_BASE) {
       push(start, TARGET_BASE[id]);
-      for (const change of fakeChanges(start, end)) if (change.id === id) push(change.t, change.state);
+      for (const change of fakeChanges(start, end, v.users === "one")) if (change.id === id) push(change.t, change.state);
       items.sort((a, b) => Number(a.lu) - Number(b.lu));
     } else if (id === OUTDOOR) {
       for (let t = start; t <= end; t += 10 * MINUTE) push(t, fakeOutdoor(t, c).toFixed(1));
@@ -746,8 +749,8 @@ const heatingStats: Scene = {
   name: "Heating stats",
   tag: "yvz-heating-stats-card",
   width: 560,
-  config: { type: "custom:yvz-heating-stats-card", outdoor: OUTDOOR },
-  extra: [{ type: "custom:yvz-heating-stats-card", compact: true, outdoor: OUTDOOR }],
+  config: { type: "custom:yvz-heating-stats-card", outdoor: OUTDOOR, period: "week" },
+  extra: [{ type: "custom:yvz-heating-stats-card", compact: true, outdoor: OUTDOOR, period: "week" }],
   history: fakeHistory,
   registry: statsRegistry,
   controls: [
@@ -760,6 +763,7 @@ const heatingStats: Scene = {
     { key: "season", label: "Season sensors", type: "checkbox", value: true },
     { key: "longTerm", label: "Long-term sensors (today, week, month)", type: "checkbox", value: false },
     { key: "logbook", label: "Logbook (who changed it)", type: "select", value: "normal", options: ["normal", "empty", "fails"] },
+    { key: "users", label: "People changing things", type: "select", value: "two", options: ["two", "one"] },
     { key: "mild", label: "Mild outside (no degree-days)", type: "checkbox", value: false },
     { key: "shortCycle", label: "Pump short-cycling yesterday evening", type: "checkbox", value: true },
     { key: "leaderChanged", label: "Leading room changed in the period", type: "checkbox", value: true },
@@ -786,7 +790,12 @@ const heatingStats: Scene = {
 };
 
 heatingStats.presets = [
-  { name: "Wide panel", width: 1100, height: 780, extra: [] },
+  { name: "Wide panel (1440)", width: 1440, height: 1010, extra: [] },
+  { name: "Wide, stacked columns (1000)", width: 1000, extra: [] },
+  { name: "30 days", config: { type: "custom:yvz-heating-stats-card", outdoor: OUTDOOR, period: "month" }, width: 1440, height: 1010, extra: [] },
+  { name: "One person", values: { users: "one" }, width: 1440, extra: [] },
+  { name: "Names off", config: { type: "custom:yvz-heating-stats-card", outdoor: OUTDOOR, show_user: false }, width: 1440, extra: [] },
+  { name: "No outdoor, 30 days", config: { type: "custom:yvz-heating-stats-card", period: "month" }, width: 1440, extra: [] },
   { name: "Frost target and spike", values: { frost: true, spike: true } },
   { name: "Dip and rebound", values: { dip: true } },
   { name: "One active day", values: { oneDay: true } },
@@ -797,7 +806,8 @@ heatingStats.presets = [
   { name: "Logbook empty", values: { logbook: "empty" } },
   { name: "Logbook fails", values: { logbook: "fails" } },
   { name: "Names and targets off", config: { type: "custom:yvz-heating-stats-card", show_user: false, target_events: false } },
-  { name: "Narrow", width: 320, extra: [] },
+  { name: "Narrow (320)", width: 320, extra: [] },
+  { name: "Phone (390)", width: 390, extra: [] },
   {
     name: "New install",
     values: { dataDays: 2 },
