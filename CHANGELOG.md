@@ -2,6 +2,18 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.13.0 — 2026-11-02
+
+### Changed
+
+- Heating stats, wide layout (from 900 px card width): the period control sits beside the title, and the key figures form one strip of up to eight tiles: runtime, starts, longest run, average · leading room, degree-days, pump per degree-day, time at target and heating rate. Tiles whose data is missing are left out (no `outdoor`: no degree-day tiles; 30 days: no time at target), and the rows fill evenly instead of leaving a lone tile. The Warm-up and Efficiency sections are gone: their numbers are tiles now, and the estimate to the target is in the heating rate tile.
+- Heating stats: from 1100 px the main area has two columns, timeline and daily bars on the left, rooms and events on the right, as panels. Below that everything stacks. The season line moved into the daily bars header. The average tile shows the coldest and warmest temperature, with the room names in its tooltip. The compact layout is unchanged.
+- Heating stats: the start label of the timeline includes the date on the 7 and 30 day views.
+
+### Added
+
+- Heating stats, "who changed it" pins on the run timeline: every change by a person (their initial, a stable colour each) or an automation ("A", neutral) sits in a lane under the pump strip. Pins close together merge into one with a count. Click a pin, or press Enter or Space, for a popover with what, who and when (a cluster lists its changes); Escape or a press elsewhere closes it. The pins use all events in the window, not just the 20 in the list. `show_user: false` removes the lane.
+
 ## 0.12.1 — 2026-11-02
 
 ### Fixed
