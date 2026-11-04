@@ -5,7 +5,7 @@ import { TESLA_ENTITIES, type TeslaEntityKey } from "../src/cards/tesla/types";
 import type { HassEntity, HomeAssistant } from "../src/shared/types";
 
 const DEVICE = "car";
-const KEYS: TeslaEntityKey[] = ["battery", "status", "lock", "trunk", "frunk", "flash", "honk", "wake", "location"];
+const KEYS: TeslaEntityKey[] = ["battery", "inside_temp", "status", "lock", "trunk", "frunk", "flash", "honk", "wake", "location"];
 const id = (key: TeslaEntityKey) => `${TESLA_ENTITIES[key].domain}.car_${key}`;
 
 const registry = Object.fromEntries(
@@ -25,22 +25,33 @@ interface Car {
   lock: string;
   trunk: string;
   batteryAt: number;
+  // When everything else last changed.
+  othersAt?: number;
+  // The inside temperature, if it changed more recently than the battery.
+  tempAt?: number;
+  noStatus?: boolean;
 }
 
-const states = (car: Car) =>
-  Object.fromEntries(
+const states = (car: Car) => {
+  const at = car.othersAt ?? Date.now();
+  return Object.fromEntries(
     [
       ent("battery", "64", car.batteryAt),
-      ent("status", car.status),
-      ent("lock", car.lock),
-      ent("trunk", car.trunk),
-      ent("frunk", "closed"),
-      ent("flash", "unknown"),
-      ent("honk", "unknown"),
-      ent("wake", "unknown"),
-      ent("location", "home"),
-    ].map((e) => [e.entity_id, e]),
+      ent("inside_temp", "19", car.tempAt ?? car.batteryAt),
+      ent("status", car.status, at),
+      ent("lock", car.lock, at),
+      ent("trunk", car.trunk, at),
+      ent("frunk", "closed", at),
+      // Buttons are pressed now and then; their timestamp says nothing about the car.
+      ent("flash", "unknown", Date.now()),
+      ent("honk", "unknown", Date.now()),
+      ent("wake", "unknown", Date.now()),
+      ent("location", "home", at),
+    ]
+      .filter((e) => !(car.noStatus && e.entity_id === id("status")))
+      .map((e) => [e.entity_id, e]),
   );
+};
 
 let calls: Array<{ domain: string; service: string; data: Record<string, unknown> }>;
 let answer: (domain: string, service: string) => Promise<unknown>;
@@ -48,7 +59,7 @@ let answer: (domain: string, service: string) => Promise<unknown>;
 const makeHass = (car: Car): HomeAssistant =>
   ({
     states: states(car),
-    entities: registry,
+    entities: car.noStatus ? Object.fromEntries(Object.entries(registry).filter(([k]) => k !== id("status"))) : registry,
     devices: { [DEVICE]: { name: "Tesla" } },
     language: "en",
     locale: { language: "en" },
@@ -97,27 +108,84 @@ beforeEach(() => {
 
 afterEach(() => vi.useRealTimers());
 
+const HOUR = 3_600_000;
+
 describe("live data", () => {
   it("shows a change of the car's state as soon as hass changes", async () => {
-    const card = await make({ status: "off", batteryAt: Date.now() - 95 * 60_000 });
+    const old = Date.now() - 95 * 60_000;
+    const card = await make({ status: "off", batteryAt: old, othersAt: old });
     expect(root(card).textContent).toContain("Asleep");
-    expect(subtitle(card)).toContain("1 h 35 min ago");
+    expect(subtitle(card)).toContain("Last seen 1 h 35 min ago");
 
     card.hass = makeHass({ ...base, status: "on", lock: "unlocked", batteryAt: Date.now() });
     await card.updateComplete;
     expect(root(card).textContent).not.toContain("Asleep");
     expect(root(card).textContent).toContain("Parked");
-    expect(subtitle(card)).toContain("just now");
+    expect(subtitle(card)).toContain("Online now");
     expect(tile(card, "lock").value).toBe("Unlocked");
   });
 
-  it("moves the 'ago' text along with the clock", async () => {
-    const card = await make({ batteryAt: Date.now() });
-    expect(subtitle(card)).toContain("just now");
+  it("moves the 'last seen' text along with the clock", async () => {
+    const card = await make({ status: "off", batteryAt: Date.now(), othersAt: Date.now() });
+    expect(subtitle(card)).toContain("Last seen just now");
     vi.setSystemTime(Date.now() + 5 * 60_000);
     vi.advanceTimersByTime(60_000);
     await card.updateComplete;
-    expect(subtitle(card)).toContain("6 min ago");
+    expect(subtitle(card)).toContain("Last seen 6 min ago");
+  });
+});
+
+describe("how fresh the data is", () => {
+  const stale = (card: YvzTeslaCard) => root(card).querySelector("yvz-banner") !== null;
+
+  it("says Online now while the car is online, even when the battery has not changed for hours", async () => {
+    const old = Date.now() - 5 * HOUR;
+    const card = await make({ status: "on", batteryAt: old, othersAt: old });
+    expect(subtitle(card)).toContain("Online now");
+    expect(subtitle(card)).not.toContain("ago");
+    expect(stale(card)).toBe(false);
+    expect(root(card).textContent).not.toContain("Old data");
+  });
+
+  it("asleep: last seen comes from the newest entity, not the steady battery", async () => {
+    const card = await make({
+      status: "off",
+      batteryAt: Date.now() - 4 * HOUR,
+      tempAt: Date.now() - 20 * 60_000,
+      othersAt: Date.now() - 4 * HOUR,
+    });
+    expect(subtitle(card)).toContain("Last seen 20 min ago");
+    expect(stale(card)).toBe(false);
+  });
+
+  it("ignores buttons: a fresh press does not make a sleeping car look seen", async () => {
+    const old = Date.now() - 4 * HOUR;
+    const card = await make({ status: "off", batteryAt: old, othersAt: old });
+    expect(subtitle(card)).toContain("Last seen 4 h 0 min ago");
+  });
+
+  it("warns about old data from the same timestamp when asleep", async () => {
+    const old = Date.now() - 5 * HOUR;
+    const card = await make({ status: "off", batteryAt: old, othersAt: old });
+    expect(stale(card)).toBe(true);
+    expect(text(card, "yvz-banner")).toContain("5 h");
+    expect(root(card).textContent).toContain("Old data");
+
+    // The temperature moved 10 minutes ago: not stale any more.
+    card.hass = makeHass({ ...base, status: "off", batteryAt: old, othersAt: old, tempAt: Date.now() - 10 * 60_000 });
+    await card.updateComplete;
+    expect(stale(card)).toBe(false);
+  });
+
+  it("without a status entity it keeps the old behaviour: the battery's own age", async () => {
+    const card = await make({ noStatus: true, batteryAt: Date.now() - 95 * 60_000, tempAt: Date.now() - 2 * 60_000 });
+    expect(subtitle(card)).toContain("1 h 35 min ago");
+    expect(subtitle(card)).not.toContain("Last seen");
+    expect(subtitle(card)).not.toContain("Online now");
+
+    document.body.replaceChildren();
+    const old = await make({ noStatus: true, batteryAt: Date.now() - 5 * HOUR });
+    expect(stale(old)).toBe(true);
   });
 });
 

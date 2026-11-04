@@ -2,6 +2,12 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.14.1 — 2026-11-04
+
+### Fixed
+
+- Tesla: the "last update" age no longer says "4 h ago" while the car is online. With the car online the header shows "Online now" and no stale warning. With the car asleep it shows "Last seen X ago", taken from the newest change across the car's entities (buttons and unavailable ones left out) instead of the battery alone, which can stay unchanged for hours. The stale banner and chip use the same timestamp. Without a status entity the old behaviour stays.
+
 ## 0.14.0 — 2026-11-04
 
 ### Added

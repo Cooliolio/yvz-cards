@@ -274,11 +274,38 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
 
   /* ---------- derived values ---------- */
 
-  // Minutes since the car last reported.
+  // The car is awake and Home Assistant is getting data from it.
+  private get online(): boolean {
+    return this.has("status") && this.st("status")?.state === "on";
+  }
+
+  // When anything the car reports last changed, in ms. A steady battery keeps its last_updated for hours while
+  // other entities (temperatures, location) move, so the newest of them all is when the car was last seen.
+  // Buttons are left out (they never carry the car's state) and so are entities that are unavailable or unknown
+  // (their last_updated is when they went missing).
+  private get lastSeen(): number | null {
+    let newest: number | null = null;
+    for (const id of Object.values(this.resolved.entities)) {
+      const st = id ? this.hass?.states[id] : undefined;
+      if (!st || st.entity_id.startsWith("button.") || NO_VALUE.includes(st.state)) continue;
+      const at = Date.parse(st.last_updated);
+      if (Number.isFinite(at) && (newest === null || at > newest)) newest = at;
+    }
+    return newest;
+  }
+
+  // Minutes since the car was last seen; 0 while it is online. Without a status entity there is no telling
+  // asleep from online, so the battery's own timestamp is used as before.
   private get age(): number | null {
-    const st = this.st("battery");
-    const ts = st?.last_reported ?? st?.last_updated;
-    return ts ? Math.max(0, Math.round((Date.now() - Date.parse(ts)) / 60_000)) : null;
+    if (this.online) return 0;
+    let at: number | null;
+    if (this.has("status")) at = this.lastSeen;
+    else {
+      const st = this.st("battery");
+      const ts = st?.last_reported ?? st?.last_updated;
+      at = ts ? Date.parse(ts) : null;
+    }
+    return at === null || !Number.isFinite(at) ? null : Math.max(0, Math.round((Date.now() - at) / 60_000));
   }
 
   // Time left to full as ms; the sensor is either a timestamp or hours/minutes.
@@ -613,6 +640,18 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
     if (this.on("update")) chips.push({ state: "standby", icon: "mdi:update", text: t("tesla.update"), more: "update" });
     if (this.on("sentry")) chips.push({ state: "error", icon: "mdi:record-circle", text: t("tesla.sentry"), more: "sentry" });
     return chips;
+  }
+
+  // What the header says about freshness: online now, when an asleep car was last seen, or the data's age.
+  private agoText(age: number | null): string | null {
+    const t = this.t;
+    if (this.noData) return null;
+    if (this.online) return t("tesla.online_now");
+    if (age === null) return null;
+    if (this.has("status")) {
+      return age < 1 ? t("tesla.last_seen_now") : t("tesla.last_seen", { time: formatDuration(t, age * 60_000) });
+    }
+    return age < 1 ? t("tesla.just_now") : t("host.ago", { time: formatDuration(t, age * 60_000) });
   }
 
   private get stale(): boolean {
@@ -1037,8 +1076,7 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
             : undefined;
 
     const location = this.location;
-    const agoText =
-      age === null || this.noData ? null : age < 1 ? t("tesla.just_now") : t("host.ago", { time: formatDuration(t, age * 60_000) });
+    const agoText = this.agoText(age);
     const lockState = this.st("lock")?.state;
     const inside = this.num("inside_temp");
     const subtitle = [
