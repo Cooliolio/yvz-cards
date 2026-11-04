@@ -419,17 +419,19 @@ For the **Tesla Fleet** and **Teslemetry** integrations. Pick your car and every
 | `controls` | lock, defrost, seats, steering, sentry, charge port, frunk, trunk, flash | Tiles to show: `defrost`, `seat_left`, `seat_right`, `steering`, `charge_switch`, `charge_port`, `lock`, `sentry`, `frunk`, `trunk`, `windows`, `flash`, `honk`, `wake`. |
 | `show_climate` | `true` | Climate on/off and target temperature. |
 | `show_charge_limit` | `true` | Charge limit slider. |
+| `confirm` | `bar` | How risky controls (trunk, frunk, charge port, windows, unlocking) ask first: `bar` shows a question with Cancel and a confirm button under the tiles, `tap` needs a second tap within 4 s, `none` sends at once. |
+| `refresh_after_command` | `true` | After a command, ask Home Assistant to fetch the car again at about 5, 15, 30 and 60 s (20 and 60 s after a wake), stopping once the car is online and something changed. Each fetch can cost Fleet API credit. |
 | `entities` | | Override any entity found automatically, by key (see the visual editor). |
 | `prefix` | | Legacy fallback: builds ids like `sensor.model_3_battery_level`. |
 
 - The battery line turns green and pulses while charging, solid green when complete, amber when plugged in but not charging below the limit, and red when the charger has no power. The marker on the line is the charge limit.
 - The car shows what is going on: lids and windows opening, the cable with current flowing while charging, an orange glow and rising heat with the climate on, wisps on the windows while defrosting, "z"s while asleep, blinking lights when it locks or unlocks.
 - Chips sit under the battery in one line of fixed height: what the car is doing (parked, driving, asleep), plus anything unlocked, open, a tyre warning, an update or sentry. Locked and the inside temperature are in the subtitle.
-- Controls are grouped into Climate, Charging, Security and Actions. Heaters show their level as dots. Lock, frunk, trunk, charge port, windows and honk need a second tap to confirm.
+- Controls are grouped into Climate, Charging, Security and Actions. Heaters show their level as dots. Every press shows Sending…, then Done or why it failed. Trunk, frunk, charge port, windows and unlocking ask first in a bar under the tiles that stays until you choose, or says "Cancelled" after 30 s; locking, flash and honk send at once. A sleeping car is woken by the command first, which can take up to 30 s.
 - Hold −/+ to keep stepping the target temperature; several taps are sent as one command.
 - **Settings** (cog): choose which controls and panels show. Saved in this browser only, and overrides `controls` until you reset it.
 - While driving, the card shows speed and gear and hides climate and controls.
-- Tap the car while it is asleep, twice, to wake it. A banner warns when the car's data is more than three hours old.
+- Tap the car while it is asleep to wake it. A banner warns when the car's data is more than three hours old.
 
 ## Panel view
 

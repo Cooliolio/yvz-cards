@@ -81,8 +81,8 @@ export interface ControlDef {
   group: ControlGroup;
   kind: ControlKind;
   icon: string;
-  // Needs a second tap to confirm.
-  arm?: boolean;
+  // Asks before sending: always, or only when this would unlock the car.
+  confirm?: "always" | "unlock";
   // Steps a select goes through, in order; options the car doesn't offer are skipped.
   options?: string[];
 }
@@ -99,14 +99,14 @@ export const CONTROLS = {
   seat_right: { group: "climate", kind: "cycle", icon: "mdi:car-seat-heater", options: ["off", "low", "medium", "high"] },
   steering: { group: "climate", kind: "cycle", icon: "mdi:steering", options: ["off", "low", "high"] },
   charge_switch: { group: "charging", kind: "toggle", icon: "mdi:ev-station" },
-  charge_port: { group: "charging", kind: "cover", icon: "mdi:ev-plug-type2", arm: true },
-  lock: { group: "security", kind: "lock", icon: "mdi:lock", arm: true },
+  charge_port: { group: "charging", kind: "cover", icon: "mdi:ev-plug-type2", confirm: "always" },
+  lock: { group: "security", kind: "lock", icon: "mdi:lock", confirm: "unlock" },
   sentry: { group: "security", kind: "toggle", icon: "mdi:shield-car" },
-  frunk: { group: "security", kind: "open_only", icon: "mdi:car-select", arm: true },
-  trunk: { group: "security", kind: "cover", icon: "mdi:car-back", arm: true },
-  windows: { group: "security", kind: "cover", icon: "mdi:car-door", arm: true },
+  frunk: { group: "security", kind: "open_only", icon: "mdi:car-select", confirm: "always" },
+  trunk: { group: "security", kind: "cover", icon: "mdi:car-back", confirm: "always" },
+  windows: { group: "security", kind: "cover", icon: "mdi:car-door", confirm: "always" },
   flash: { group: "actions", kind: "button", icon: "mdi:car-light-high" },
-  honk: { group: "actions", kind: "button", icon: "mdi:bullhorn", arm: true },
+  honk: { group: "actions", kind: "button", icon: "mdi:bullhorn" },
   wake: { group: "actions", kind: "button", icon: "mdi:sleep-off" },
 } as const satisfies Record<string, ControlDef & { kind: ControlKind }>;
 
@@ -138,6 +138,14 @@ export const PAINTS = {
 
 export type PaintKey = keyof typeof PAINTS | "custom";
 
+// How a risky control asks before it sends: a bar under the tiles, a second tap, or not at all.
+export type ConfirmMode = "bar" | "tap" | "none";
+
+export const CONFIRM_MODES: ConfirmMode[] = ["bar", "tap", "none"];
+
+// What a control does when pressed in its current state; picks the wording of the question.
+export type ControlVerb = "open" | "close" | "lock" | "unlock";
+
 export type TeslaCardConfig = LovelaceCardConfig & {
   device_id?: string;
   name?: string;
@@ -148,6 +156,10 @@ export type TeslaCardConfig = LovelaceCardConfig & {
   controls?: ControlKey[];
   show_climate?: boolean;
   show_charge_limit?: boolean;
+  // Default "bar". "tap" keeps the old second-tap pattern, "none" sends at once.
+  confirm?: ConfirmMode;
+  // Default on: after a command, ask Home Assistant to fetch the car's state again a few times.
+  refresh_after_command?: boolean;
   // Legacy: builds entity ids like sensor.model_3_battery_level.
   prefix?: string;
   entities?: Partial<Record<TeslaEntityKey, string>>;

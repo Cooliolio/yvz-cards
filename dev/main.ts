@@ -71,6 +71,7 @@ function openScene(next: Scene, nextPreset?: Preset): void {
   values = { ...Object.fromEntries(next.controls.map((c) => [c.key, c.value])), ...nextPreset?.values };
   configText = JSON.stringify(nextPreset?.config ?? next.config, null, 2);
   extras = nextPreset?.extra ?? next.extra ?? [];
+  actedFor = undefined;
   configError = false;
   cards = [];
 }
@@ -121,6 +122,12 @@ function buildHass(): HomeAssistant {
     async callService(domain, service, data) {
       log.unshift(`${domain}.${service} ${JSON.stringify(data ?? {})}`);
       log.length = Math.min(log.length, 12);
+      const wait = scene.serviceDelay?.(domain, service, data ?? {}, values) ?? 0;
+      if (wait === Infinity) await new Promise(() => {});
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+      // Like the websocket, a failure is an object with a code and a message, not an Error.
+      const error = scene.serviceError?.(domain, service, data ?? {}, values);
+      if (error) throw { code: "home_assistant_error", message: error };
       const patch = scene.service?.(domain, service, data ?? {}, values);
       if (patch) values = { ...values, ...patch };
       update();
@@ -143,6 +150,19 @@ function syncCard(stage: HTMLElement): void {
   }
   const hass = buildHass();
   for (const el of cards) el.hass = hass;
+  runActs();
+}
+
+// A preset can tap things once the card has rendered, so a state that needs a press is there to look at.
+let actedFor: Preset | undefined;
+function runActs(): void {
+  const acts = preset?.act;
+  if (!acts?.length || actedFor === preset) return;
+  actedFor = preset;
+  const card = cards[0] as (CardElement & { updateComplete?: Promise<unknown> }) | undefined;
+  void card?.updateComplete?.then(() => {
+    for (const selector of acts) card.shadowRoot?.querySelector<HTMLElement>(selector)?.click();
+  });
 }
 
 function applyConfig(): void {

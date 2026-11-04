@@ -25,6 +25,9 @@ export interface Preset {
   extra?: Record<string, unknown>[];
   width?: number;
   height?: number;
+  // Taps made once the card is up, as selectors for elements in the first card's shadow root: lands the
+  // preset in a state that needs a press (an open question, a command that is out).
+  act?: string[];
 }
 
 export interface Scene {
@@ -51,6 +54,9 @@ export interface Scene {
   ws?(message: Record<string, unknown>, values: Record<string, ControlValue>): unknown;
   // For cards that look entities up in the registry instead of taking ids.
   registry?: { entities: Record<string, HassEntityRegistryEntry>; devices: Record<string, HassDevice> };
+  // How long a service call takes to answer (Infinity: never), and the error it answers with, if any.
+  serviceDelay?(domain: string, service: string, data: Record<string, unknown>, values: Record<string, ControlValue>): number;
+  serviceError?(domain: string, service: string, data: Record<string, unknown>, values: Record<string, ControlValue>): string | undefined;
   // Lets service calls change the controls, standing in for HA automations.
   service?(
     domain: string,
@@ -889,6 +895,15 @@ const teslaSelect = (key: string, label: string, value: string, options: string[
   options,
 });
 
+const TESLA_SERVICE_MODES = [
+  "instantly",
+  "slowly",
+  "wake first",
+  "never",
+  "fails: car unavailable",
+  "fails: rate limit",
+];
+
 const tesla: Scene = {
   name: "Tesla",
   tag: "yvz-tesla-card",
@@ -928,7 +943,46 @@ const tesla: Scene = {
     teslaSelect("shift", "Gear", "p", ["p", "d", "r", "n"]),
     gaugeControl("speed", "Speed (km/h)", 50, 0, 160),
     gaugeControl("driveAge", "Gear and speed updated (min ago)", 0, 0, 60),
+    teslaSelect("serviceMode", "Commands answer", "instantly", TESLA_SERVICE_MODES),
   ],
+  presets: [
+    { name: "Asleep", values: { status: "off", age: 95 } },
+    { name: "Waking (tap Flash)", values: { status: "off", age: 95, serviceMode: "wake first" }, act: ['yvz-tile[data-key="flash"]'] },
+    { name: "Sending (slow)", values: { serviceMode: "slowly" }, act: ['yvz-tile[data-key="flash"]'] },
+    { name: "Success (tap Flash)", act: ['yvz-tile[data-key="flash"]'] },
+    {
+      name: "Failure: car unavailable",
+      values: { serviceMode: "fails: car unavailable" },
+      act: ['yvz-tile[data-key="honk"]'],
+      config: { type: "custom:yvz-tesla-card", device_id: TESLA_DEVICE, controls: ["lock", "defrost", "sentry", "charge_port", "frunk", "trunk", "flash", "honk"] },
+    },
+    { name: "Failure: rate limit", values: { serviceMode: "fails: rate limit" }, act: ['yvz-tile[data-key="flash"]'] },
+    { name: "Never answers (60 s)", values: { serviceMode: "never" }, act: ['yvz-tile[data-key="flash"]'] },
+    { name: "Confirm bar: trunk", act: ['yvz-tile[data-key="trunk"]'] },
+    { name: "Confirm bar: unlock", values: { lock: "locked" }, act: ['yvz-tile[data-key="lock"]'] },
+    {
+      name: "Confirm: tap twice",
+      config: { type: "custom:yvz-tesla-card", device_id: TESLA_DEVICE, confirm: "tap" },
+      act: ['yvz-tile[data-key="trunk"]'],
+    },
+    { name: "Confirm bar, phone (360)", width: 360, extra: [], act: ['yvz-tile[data-key="trunk"]'] },
+  ],
+  serviceDelay(domain, _service, data, v) {
+    if (domain === "homeassistant") return 0;
+    const mode = String(v.serviceMode);
+    if (mode === "never") return Infinity;
+    if (mode === "slowly") return 4000;
+    // A sleeping car is woken first, then the command goes.
+    if (mode === "wake first" || (v.status === "off" && data.entity_id !== teslaId("wake"))) return 6000;
+    return 0;
+  },
+  serviceError(domain, _service, _data, v) {
+    if (domain === "homeassistant") return undefined;
+    const mode = String(v.serviceMode);
+    if (mode === "fails: car unavailable") return "Vehicle unavailable: the car did not wake up in time";
+    if (mode === "fails: rate limit") return "Too many requests. Try again in a minute.";
+    return undefined;
+  },
   states(v) {
     const n = (key: string) => Number(v[key]);
     const flag = (key: string) => (v[key] ? "on" : "off");
@@ -987,9 +1041,19 @@ const tesla: Scene = {
     ];
     return Object.fromEntries(list.map((e) => [e.entity_id, e]));
   },
-  service(domain, service, data): Record<string, ControlValue> | void {
+  service(domain, service, data, v): Record<string, ControlValue> | void {
     const key = TESLA_KEYS.find((k) => teslaId(k) === data.entity_id);
     if (!key) return;
+    // A command wakes a sleeping car first.
+    const woken: Record<string, ControlValue> = v.status === "off" && key !== "wake" ? { status: "on", age: 0 } : {};
+    const patch = teslaPatch(domain, service, data, key) ?? {};
+    const merged = { ...woken, ...patch };
+    return Object.keys(merged).length ? merged : undefined;
+  },
+};
+
+function teslaPatch(domain: string, service: string, data: Record<string, unknown>, key: TeslaEntityKey): Record<string, ControlValue> | void {
+  {
     if (domain === "lock") return { lock: service === "lock" ? "locked" : "unlocked" };
     if (domain === "switch" && key === "charge_switch") {
       return { charging: service === "turn_on" ? "charging" : "stopped" };
@@ -1003,8 +1067,8 @@ const tesla: Scene = {
       return { climate: service === "turn_on" ? "heat_cool" : "off" };
     }
     if (domain === "button" && key === "wake") return { status: "on", age: 0 };
-  },
-};
+  }
+}
 
 const gaugeCard: Scene = {
   name: "Gauge card",

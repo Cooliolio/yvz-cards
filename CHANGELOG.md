@@ -2,6 +2,20 @@
 
 All notable changes to YVZ Cards. Versions follow [semantic versioning](https://semver.org/).
 
+## 0.14.0 — 2026-11-04
+
+### Added
+
+- Tesla: clear feedback on every press. A tile shows "Sending…" (or "Waking car…" when the car is asleep), then "Done", or "Failed" with the reason Home Assistant gave. A command that gets no answer for 60 seconds says "No answer yet, it may still work" instead of failing. A second press while one is out is ignored. Results are announced to screen readers (a failure as an alert), and a sleeping car shows a line saying a command wakes it first and can take up to 30 seconds.
+- Tesla: after any control press the card asks Home Assistant to fetch the car again at about 5, 15, 30 and 60 seconds (20 and 60 seconds after a wake), and stops once the car is online and something it reports has changed. `refresh_after_command: false` turns it off.
+- Tesla, `confirm` option: `bar` (default), `tap` or `none`. The bar asks "Open the trunk?" under the tiles with Cancel and a confirm button, scrolls into view, puts focus on Cancel and stays until you choose; after 30 seconds it cancels itself and says "Cancelled". Escape cancels.
+- Playground: Tesla presets for asleep, waking, sending, success, failures with a reason, never answering and the confirm bar, with simulated delays and failures.
+
+### Changed
+
+- Tesla: trunk, frunk, charge port, windows and unlocking use the bar. Locking, flash and honk send at once. Tapping the sleeping car to wake it needs one tap, not two. With `confirm: tap` the old second-tap pattern remains, now labelled "Tap again to open" with a countdown, and an ignored tile says "Cancelled".
+- Tesla, contrast: the armed and result states use a soft fill with `--yvz-state-text` text and ring instead of white on red (4.13:1), and unavailable or asleep tiles keep their text readable (4.5:1 or better in light and dark) instead of fading to 3.7:1. Tiles have new `attention`, `busy` and `countdown` options.
+
 ## 0.13.0 — 2026-11-02
 
 ### Changed

@@ -29,6 +29,13 @@ export class YvzTile extends LitElement {
   @property({ type: Boolean, reflect: true }) muted = false;
   // Transparent with a thin border until selected.
   @property({ type: Boolean, reflect: true }) outline = false;
+  // Draws attention without a loud fill: soft --yvz-state background, a 2px ring and text in --yvz-state-text (the
+  // plain state colours are too pale for a ring on a light card).
+  @property({ type: Boolean, reflect: true }) attention = false;
+  // Waiting for something: the first badge spins.
+  @property({ type: Boolean, reflect: true }) busy = false;
+  // Milliseconds left to answer; draws a bar along the bottom that drains over this time.
+  @property({ type: Number }) countdown = 0;
 
   static override styles = [
     designStyles,
@@ -94,9 +101,67 @@ export class YvzTile extends LitElement {
         pointer-events: none;
       }
 
-      :host([disabled]:not([selected])) button,
+      /* a card can set these to keep a disabled tile readable instead of fading it */
+      :host([disabled]:not([selected])) button {
+        opacity: var(--yvz-tile-disabled-opacity, 0.55);
+        color: var(--yvz-tile-disabled-color, inherit);
+      }
+
       :host([muted]) button {
         opacity: 0.55;
+      }
+
+      :host([attention]) button {
+        position: relative;
+        overflow: hidden;
+        background: var(--yvz-state-soft, var(--yvz-accent-soft));
+        box-shadow: inset 0 0 0 2px var(--yvz-state-text, var(--yvz-accent-text));
+        color: var(--yvz-state-text, var(--yvz-accent-text));
+        font-weight: var(--yvz-weight-medium);
+      }
+
+      :host([attention]) ha-icon {
+        color: inherit;
+      }
+
+      :host([busy]) ha-icon:first-of-type {
+        animation: spin 1s linear infinite;
+      }
+
+      .timer {
+        position: absolute;
+        inset: auto 0 0 0;
+        height: 3px;
+        background: var(--yvz-state-text, var(--yvz-accent-text));
+        transform-origin: left;
+        animation: drain var(--_countdown) linear forwards;
+        pointer-events: none;
+      }
+
+      @keyframes drain {
+        from {
+          transform: scaleX(1);
+        }
+        to {
+          transform: scaleX(0);
+        }
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        :host([busy]) ha-icon:first-of-type {
+          animation: none;
+        }
+
+        .timer {
+          animation: none;
+          transform: scaleX(0.5);
+        }
       }
 
       .top {
@@ -162,7 +227,14 @@ export class YvzTile extends LitElement {
 
   protected override render() {
     const aria = this.valueText ? `${this.label}: ${this.valueText}` : nothing;
-    return html`<button type="button" ?disabled=${this.disabled} aria-pressed=${this.selected} aria-label=${aria}>
+    return html`<button
+      type="button"
+      ?disabled=${this.disabled}
+      aria-pressed=${this.selected}
+      aria-busy=${this.busy ? "true" : nothing}
+      aria-label=${aria}
+      style=${this.countdown > 0 ? `--_countdown: ${this.countdown}ms` : nothing}
+    >
       <span class="top">
         <span class="label">${this.label}</span>
         ${this.badges.map((b) => html`<ha-icon .icon=${b.icon} data-state=${b.state ?? nothing} data-tint=${b.tint ? "" : nothing}></ha-icon>`)}
@@ -174,6 +246,7 @@ export class YvzTile extends LitElement {
         : this.value
           ? html`<span class="value">${this.value}</span>`
           : nothing}
+      ${this.countdown > 0 ? html`<span class="timer" aria-hidden="true"></span>` : nothing}
     </button>`;
   }
 }

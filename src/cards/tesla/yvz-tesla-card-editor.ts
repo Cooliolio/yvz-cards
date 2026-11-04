@@ -4,6 +4,7 @@ import type { TranslationKey } from "../../shared/i18n";
 import type { HaFormSchema } from "../../shared/types";
 import { prune, YvzCardEditor } from "../../shared/yvz-card-editor";
 import {
+  CONFIRM_MODES,
   CONTROL_KEYS,
   DEFAULT_CONTROLS,
   EDITOR_ENTITY_KEYS,
@@ -47,6 +48,16 @@ export class YvzTeslaCardEditor extends YvzCardEditor<TeslaCardConfig> {
         },
       },
       {
+        name: "confirm",
+        selector: {
+          select: {
+            mode: "dropdown",
+            options: CONFIRM_MODES.map((value) => ({ value, label: t(`tesla.confirm_mode.${value}` as TranslationKey) })),
+          },
+        },
+      },
+      { name: "refresh_after_command", selector: { boolean: {} } },
+      {
         type: "expandable" as const,
         name: "entities",
         title: t("tesla.field.entities"),
@@ -72,6 +83,8 @@ export class YvzTeslaCardEditor extends YvzCardEditor<TeslaCardConfig> {
     // Switches are on by default, so only the off state is worth saving.
     if (value.show_climate === true) delete value.show_climate;
     if (value.show_charge_limit === true) delete value.show_charge_limit;
+    if (value.refresh_after_command === true) delete value.refresh_after_command;
+    if (value.confirm === "bar") delete value.confirm;
     if (value.paint !== "custom") delete value.paint_rgb;
     this.emit(prune(value));
   }
@@ -82,6 +95,8 @@ export class YvzTeslaCardEditor extends YvzCardEditor<TeslaCardConfig> {
       paint: "stealth_grey",
       show_climate: true,
       show_charge_limit: true,
+      refresh_after_command: true,
+      confirm: "bar",
       controls: DEFAULT_CONTROLS,
       ...this.config,
     };

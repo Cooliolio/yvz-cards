@@ -1,4 +1,4 @@
-import { css, html, nothing, type CSSResultGroup, type PropertyValues, type TemplateResult } from "lit";
+import { css, html, nothing, unsafeCSS, type CSSResultGroup, type PropertyValues, type TemplateResult } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import "../../design";
 import type { SegmentOption, TileBadge, YvzState } from "../../design";
@@ -7,11 +7,14 @@ import type { TranslationKey } from "../../shared/i18n";
 import { haptic } from "../../shared/haptic";
 import { fireMoreInfo } from "../../shared/more-info";
 import { registerCard } from "../../shared/register-card";
+import { reducedMotion } from "../../design/tween";
 import { animateHeight, viewSwapStyles } from "../../design/view-swap";
 import { TickController } from "../../shared/tick-controller";
 import type { HassEntity, HomeAssistant, LovelaceCardConfig } from "../../shared/types";
 import { YvzCard } from "../../shared/yvz-card";
 import { carStyles, hexToRgb, renderCar } from "./car";
+import { CommandTracker, type CommandPhase } from "./commands";
+import { RefreshSchedule, REFRESH_OFFSETS, WAKE_OFFSETS } from "./refresh";
 import "./yvz-tesla-card-editor";
 import { loadPrefs, savePrefs, type TeslaPrefs } from "./prefs";
 import { findTeslaDevice, resolveEntities, type ResolvedEntities } from "./resolve";
@@ -25,15 +28,26 @@ import {
   STALE_MINUTES,
   TPMS_KEYS,
   WINDOW_KEYS,
+  type ConfirmMode,
   type ControlGroup,
   type ControlKey,
+  type ControlVerb,
   type TeslaCardConfig,
   type TeslaEntityKey,
 } from "./types";
 
 const LEVELS = ["off", "low", "medium", "high"];
 const NO_VALUE = ["unknown", "unavailable", undefined, null, ""];
+// Tap mode: the second tap has to come within this.
 const ARM_MS = 4000;
+// The confirm bar cancels itself (visibly) after this.
+const CONFIRM_MS = 30_000;
+// "Cancelled" stays this long.
+const CANCELLED_MS = 2500;
+// While a command is out the relative times and the notice are refreshed this often.
+const LIVE_TICK_MS = 10_000;
+// Entities whose change tells us the car reported something new.
+const DATA_KEYS: TeslaEntityKey[] = ["battery", "range", "lock", "charging", "inside_temp", "location", "charge_limit"];
 const TEMP_DEBOUNCE_MS = 900;
 // How long an optimistic value wins over HA's state after it was sent.
 const HOLD_MS = 2500;
@@ -53,8 +67,12 @@ interface ChipSpec {
 
 @customElement("yvz-tesla-card")
 export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
-  // Control (or "wake-car") that waits for its confirming second tap.
-  @state() private armed?: string;
+  // Tap mode: the control that waits for its confirming second tap.
+  @state() private armed?: ControlKey;
+  // Bar mode: the control whose question is open, and what its state was when it opened.
+  @state() private confirming?: { key: ControlKey; verb: ControlVerb; from: string };
+  // The control whose confirmation just ended without being sent.
+  @state() private cancelled?: ControlKey;
   @state() private pendingTemp?: number;
   @state() private limitDraft?: number;
   @state() private flashUntil = 0;
@@ -70,7 +88,18 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
   private tempTimer?: ReturnType<typeof setTimeout>;
   private limitTimer?: ReturnType<typeof setTimeout>;
   private flashTimer?: ReturnType<typeof setTimeout>;
-  private wakeTimers: ReturnType<typeof setTimeout>[] = [];
+  private confirmTimer?: ReturnType<typeof setTimeout>;
+  private cancelledTimer?: ReturnType<typeof setTimeout>;
+  private liveTimer?: ReturnType<typeof setInterval>;
+  private tracker = new CommandTracker(() => {
+    this.requestUpdate();
+    this.syncLive();
+  });
+  private schedule = new RefreshSchedule({
+    poll: () => this.pollCar(),
+    settled: (since) => this.carSettled(since),
+    now: () => Date.now(),
+  });
 
   constructor() {
     super();
@@ -92,6 +121,7 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
     this.prefs = loadPrefs(this.config);
     this.view = "main";
     this.armed = undefined;
+    this.closeConfirm();
     this.pendingTemp = undefined;
   }
 
@@ -101,19 +131,34 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
-    for (const timer of [this.armTimer, this.tempTimer, this.limitTimer, this.flashTimer, ...this.wakeTimers]) {
+    for (const timer of [this.armTimer, this.tempTimer, this.limitTimer, this.flashTimer, this.confirmTimer, this.cancelledTimer]) {
       clearTimeout(timer);
     }
+    clearInterval(this.liveTimer);
+    this.liveTimer = undefined;
+    this.tracker.dispose();
+    this.schedule.cancel();
+    this.confirming = undefined;
+    this.armed = undefined;
   }
 
   protected override willUpdate(changed: PropertyValues): void {
     if (!this.config || !this.hass) return;
     this.blinkOnLockChange();
+    this.dropStaleConfirm();
     if (!changed.has("config") && !changed.has("hass")) return;
     const registry = this.hass.entities;
     if (this.resolvedFor?.config === this.config && this.resolvedFor.registry === registry) return;
     this.resolved = resolveEntities(this.config, this.hass);
     this.resolvedFor = { config: this.config, registry };
+  }
+
+  protected override updated(changed: PropertyValues): void {
+    if (!changed.has("confirming") || !this.confirming) return;
+    // A bar below the fold is a tap that seems to do nothing: bring it into view and put focus on the safe choice.
+    const bar = this.renderRoot.querySelector<HTMLElement>(".confirm");
+    bar?.scrollIntoView?.({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
+    bar?.querySelector<HTMLButtonElement>(".cancel")?.focus({ preventScroll: true });
   }
 
   /* ---------- settings ---------- */
@@ -146,6 +191,7 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
   }
 
   private async toggleView(): Promise<void> {
+    this.closeConfirm();
     const card = this.renderRoot.querySelector<HTMLElement>("ha-card");
     const from = card?.offsetHeight ?? 0;
     this.switched = true;
@@ -266,33 +312,151 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
 
   /* ---------- actions ---------- */
 
-  private call(domain: string, service: string, key: TeslaEntityKey, data: Record<string, unknown> = {}): void {
+  // Sends a command and follows it: Sending, then Done or the reason it failed, and asks HA for fresh data.
+  private call(domain: string, service: string, key: TeslaEntityKey, data: Record<string, unknown> = {}, id: string = key): void {
     const entity_id = this.resolved.entities[key];
-    if (!entity_id) return;
-    void this.hass!.callService(domain, service, { entity_id, ...data });
-    if (domain === "button" && key === "wake") this.refreshAfterWake();
+    const hass = this.hass;
+    if (!entity_id || !hass) return;
+    const isWake = domain === "button" && key === "wake";
+    // A sleeping car is woken by the command itself, which is why it can take a while.
+    const waking = !isWake && (this.asleep || this.noData);
+    const refresh = this.config?.refresh_after_command !== false;
+    void this.tracker.run(id, () => Promise.resolve(hass.callService(domain, service, { entity_id, ...data })), waking).then((ok) => {
+      if (ok && refresh && this.isConnected) this.schedule.afterAnswer();
+    });
+    if (refresh) {
+      this.schedule.start(isWake ? WAKE_OFFSETS : REFRESH_OFFSETS);
+      this.syncLive();
+    }
   }
 
-  // A woken car needs a moment before it reports; ask HA to poll again.
-  private refreshAfterWake(): void {
+  // Ask HA to fetch the car again: the status and one data entity.
+  private pollCar(): void {
     const entity_id = (["status", "battery"] as const).map((k) => this.resolved.entities[k]).filter(Boolean);
-    if (!entity_id.length) return;
-    this.wakeTimers.forEach(clearTimeout);
-    const poll = () => void this.hass?.callService("homeassistant", "update_entity", { entity_id }).catch(() => {});
-    this.wakeTimers = [setTimeout(poll, 20_000), setTimeout(poll, 60_000)];
+    if (!entity_id.length || !this.hass) return;
+    void Promise.resolve(this.hass.callService("homeassistant", "update_entity", { entity_id })).catch(() => {});
   }
 
-  // First tap arms, second tap (within ARM_MS) goes.
-  private arm(id: string): boolean {
+  // Enough news to stop asking: the car is online and something it reports changed since the press.
+  // (last_reported alone is not trusted: it may not move on a status-only poll.)
+  private carSettled(since: number): boolean {
+    if (!this.on("status")) return false;
+    return DATA_KEYS.some((key) => {
+      const st = this.st(key);
+      return [st?.last_updated, st?.last_reported].some((at) => Date.parse(at ?? "") > since);
+    });
+  }
+
+  // Relative times and the notice keep up while a command is out.
+  private syncLive(): void {
+    const needed = this.tracker.anyBusy || this.schedule.active;
+    if (needed && !this.liveTimer) {
+      this.liveTimer = setInterval(() => {
+        this.requestUpdate();
+        this.syncLive();
+      }, LIVE_TICK_MS);
+    } else if (!needed && this.liveTimer) {
+      clearInterval(this.liveTimer);
+      this.liveTimer = undefined;
+    }
+  }
+
+  private get confirmMode(): ConfirmMode {
+    const mode = this.config?.confirm;
+    return mode === "tap" || mode === "none" ? mode : "bar";
+  }
+
+  private verbOf(key: ControlKey, st: HassEntity): ControlVerb {
+    const kind: string = CONTROLS[key].kind;
+    if (kind === "lock") return st.state === "locked" ? "unlock" : "lock";
+    if (kind === "cover") return st.state === "open" ? "close" : "open";
+    return "open";
+  }
+
+  private needsConfirm(key: ControlKey, st: HassEntity): boolean {
+    const def = CONTROLS[key];
+    const rule = "confirm" in def ? def.confirm : undefined;
+    return rule === "always" || (rule === "unlock" && st.state === "locked");
+  }
+
+  /* ---------- confirming ---------- */
+
+  // Tap mode: first tap arms, second tap (within ARM_MS) goes. An armed tile that is left alone says so.
+  private arm(key: ControlKey): boolean {
     clearTimeout(this.armTimer);
-    if (this.armed === id) {
+    if (this.armed === key) {
       this.armed = undefined;
       return true;
     }
     haptic("warning");
-    this.armed = id;
-    this.armTimer = setTimeout(() => (this.armed = undefined), ARM_MS);
+    this.armed = key;
+    this.armTimer = setTimeout(() => {
+      this.armed = undefined;
+      this.showCancelled(key);
+    }, ARM_MS);
     return false;
+  }
+
+  // Bar mode: the question stays until it is answered, or 30 s pass and it says "Cancelled".
+  private openConfirm(key: ControlKey, verb: ControlVerb, from: string): void {
+    if (this.confirming?.key === key) {
+      this.cancelConfirm(true);
+      return;
+    }
+    clearTimeout(this.confirmTimer);
+    haptic("warning");
+    this.cancelled = undefined;
+    this.confirming = { key, verb, from };
+    this.confirmTimer = setTimeout(() => this.cancelConfirm(false), CONFIRM_MS);
+  }
+
+  // Closes the bar without sending and says so. `byUser` returns focus to the tile for keyboard users.
+  private cancelConfirm(byUser: boolean): void {
+    const open = this.confirming;
+    if (!open) return;
+    this.closeConfirm();
+    this.showCancelled(open.key);
+    if (byUser) this.focusTile(open.key);
+  }
+
+  // Closes without a word, for when the card is reconfigured or left.
+  private closeConfirm(): void {
+    clearTimeout(this.confirmTimer);
+    this.confirming = undefined;
+  }
+
+  // The car changed under an open question (already open, went unavailable): it no longer applies.
+  private dropStaleConfirm(): void {
+    const open = this.confirming;
+    if (!open) return;
+    const st = this.st(open.key);
+    if (!st || st.state !== open.from) this.cancelConfirm(false);
+  }
+
+  private showCancelled(key: ControlKey): void {
+    this.cancelled = key;
+    clearTimeout(this.cancelledTimer);
+    this.cancelledTimer = setTimeout(() => (this.cancelled = undefined), CANCELLED_MS);
+  }
+
+  private focusTile(key: ControlKey): void {
+    void this.updateComplete.then(() => {
+      this.renderRoot.querySelector<HTMLElement>(`yvz-tile[data-key="${key}"]`)?.shadowRoot?.querySelector("button")?.focus();
+    });
+  }
+
+  private confirmNow(): void {
+    const open = this.confirming;
+    if (!open) return;
+    this.closeConfirm();
+    this.focusTile(open.key);
+    this.send(open.key);
+  }
+
+  private onBarKey(e: KeyboardEvent): void {
+    if (e.key !== "Escape") return;
+    e.stopPropagation();
+    this.cancelConfirm(true);
   }
 
   private onControl(key: ControlKey): void {
@@ -303,7 +467,22 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
     if (st.state === "unavailable" || (kind !== "button" && NO_VALUE.includes(st.state))) return;
     if (kind !== "button" && this.noData) return;
     if (kind === "open_only" && st.state === "open") return; // the frunk can't be closed remotely
-    if ("arm" in def && def.arm && !this.arm(key)) return;
+    // A second press while the first is still out would send the command twice.
+    if (this.tracker.isBusy(key)) return;
+    if (this.needsConfirm(key, st) && this.confirmMode !== "none") {
+      if (this.confirmMode === "bar") {
+        this.openConfirm(key, this.verbOf(key, st), st.state);
+        return;
+      }
+      if (!this.arm(key)) return;
+    }
+    this.send(key);
+  }
+
+  private send(key: ControlKey): void {
+    const def = CONTROLS[key];
+    const st = this.st(key);
+    if (!st) return;
     haptic("selection");
 
     switch (def.kind) {
@@ -338,9 +517,9 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
     this.flashTimer = setTimeout(() => (this.flashUntil = 0), FLASH_MS);
   }
 
+  // One tap: waking is harmless, and the notice shows what happens.
   private onCar(): void {
-    if (!(this.asleep || this.noData) || !this.has("wake")) return;
-    if (!this.arm("wake-car")) return;
+    if (!(this.asleep || this.noData) || !this.has("wake") || this.tracker.isBusy("wake")) return;
     haptic("selection");
     this.call("button", "press", "wake");
   }
@@ -578,6 +757,9 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
     let steps = 0;
     let level = 0;
     let valueText = "";
+    let attention = false;
+    let busy = false;
+    let countdown = 0;
 
     switch (def.kind) {
       case "lock": {
@@ -611,12 +793,24 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
     // Heaters light up in the heat colour, like the climate section.
     if (selected && def.group === "climate") tone = "heat";
 
-    if (this.armed === key) {
-      selected = true;
-      tone = "error";
+    // What the tile says while it asks, sends or reports back; the tone is a soft fill, never white on red.
+    const say = (text: string) => {
+      selected = false;
       warn = false;
       steps = 0;
-      value = t("common.confirm");
+      value = text;
+      valueText = text;
+    };
+    if (this.confirming?.key === key) {
+      say(t("tesla.confirm.below"));
+      attention = true;
+      tone = "error";
+    }
+    if (this.armed === key) {
+      say(t(`tesla.tap_again.${this.verbOf(key, st)}` as TranslationKey));
+      attention = true;
+      tone = "error";
+      countdown = ARM_MS;
     }
     if (unavailable) {
       selected = false;
@@ -625,9 +819,24 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
       value = this.noData ? t("common.no_data") : this.asleep ? t("tesla.asleep") : t("common.unavailable");
     }
 
-    const badges: TileBadge[] = [{ icon, state: warn ? "pending" : undefined }];
+    const cmd = this.tracker.get(key);
+    let icon2: string | undefined;
+    if (cmd) {
+      say(t(`tesla.cmd.value.${cmd.phase}` as TranslationKey));
+      tone = undefined;
+      attention = cmd.phase === "done" || cmd.phase === "failed" || cmd.phase === "slow";
+      busy = cmd.phase === "sending" || cmd.phase === "waking" || cmd.phase === "slow";
+      countdown = 0;
+      if (cmd.phase === "done") tone = "on";
+      if (cmd.phase === "failed") tone = "error";
+      if (cmd.phase === "slow") tone = "pending";
+      icon2 = busy ? "mdi:loading" : cmd.phase === "done" ? "mdi:check" : "mdi:alert-circle-outline";
+    }
+
+    const badges: TileBadge[] = [{ icon: icon2 ?? icon, state: warn ? "pending" : undefined }];
     return html`<yvz-tile
       outline
+      data-key=${key}
       data-state=${tone ?? nothing}
       .label=${t(`tesla.control.${key}` as TranslationKey)}
       .value=${value}
@@ -635,10 +844,102 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
       .level=${level}
       .valueText=${valueText}
       .badges=${badges}
+      .countdown=${countdown}
       ?selected=${selected}
-      ?disabled=${unavailable}
+      ?attention=${attention}
+      ?busy=${busy}
+      ?disabled=${unavailable && !cmd}
       @click=${() => this.onControl(key)}
     ></yvz-tile>`;
+  }
+
+  /* ---------- confirm bar, notice, live regions ---------- */
+
+  private commandName(id: string): string {
+    const t = this.t;
+    if (id === "climate") return t("tesla.section_climate");
+    if (id === "charge_limit") return t("tesla.charge_limit");
+    return id in CONTROLS ? t(`tesla.control.${id as ControlKey}` as TranslationKey) : id;
+  }
+
+  // What the latest command (or a cancelled question) has to say, as text for the notice and screen readers.
+  private message(): { text: string; phase: CommandPhase | "cancelled"; slot: ControlGroup | "top" } | undefined {
+    const t = this.t;
+    const latest = this.tracker.latest;
+    if (latest) {
+      const { id, state } = latest;
+      const name = this.commandName(id);
+      const text =
+        state.phase === "failed"
+          ? state.reason
+            ? t("tesla.cmd.failed_reason", { name, reason: state.reason })
+            : t("tesla.cmd.failed", { name })
+          : t(`tesla.cmd.${state.phase}` as TranslationKey, { name });
+      const def = id in CONTROLS ? CONTROLS[id as ControlKey] : undefined;
+      const inGroup = !!def && this.shownControls.includes(id as ControlKey) && !!this.st(id as ControlKey);
+      return { text, phase: state.phase, slot: inGroup ? def.group : "top" };
+    }
+    if (this.cancelled) {
+      return { text: `${this.commandName(this.cancelled)}: ${t("tesla.cancelled")}`, phase: "cancelled", slot: CONTROLS[this.cancelled].group };
+    }
+    return undefined;
+  }
+
+  // Shown where the press happened (under its group's tiles), or under the battery for the rest.
+  private renderNotice(slot: ControlGroup | "top"): TemplateResult | typeof nothing {
+    const msg = this.message();
+    if (!msg || msg.slot !== slot) return nothing;
+    const tone: Record<string, YvzState | undefined> = {
+      sending: "off",
+      waking: "off",
+      slow: "pending",
+      done: "on",
+      failed: "error",
+      cancelled: "off",
+    };
+    const icon: Record<string, string> = {
+      sending: "mdi:loading",
+      waking: "mdi:loading",
+      slow: "mdi:clock-alert-outline",
+      done: "mdi:check",
+      failed: "mdi:alert-circle-outline",
+      cancelled: "mdi:close-circle-outline",
+    };
+    return html`<div class="notice ${msg.phase}" data-state=${tone[msg.phase] ?? nothing} aria-hidden="true">
+      <ha-icon icon=${icon[msg.phase]}></ha-icon><span>${msg.text}</span>
+    </div>`;
+  }
+
+  // The question for the open control, under the tiles of its group. It stays until it is answered.
+  private renderConfirmBar(group: ControlGroup): TemplateResult | typeof nothing {
+    const open = this.confirming;
+    if (!open || CONTROLS[open.key].group !== group) return nothing;
+    const t = this.t;
+    return html`<div class="confirm" role="group" aria-labelledby="confirm-q" aria-describedby="confirm-d" data-state="error" @keydown=${this.onBarKey}>
+      <span id="confirm-q" class="question">${t(`tesla.ask.${open.key}.${open.verb}` as TranslationKey)}</span>
+      <span class="actions">
+        <button type="button" class="cancel" @click=${() => this.cancelConfirm(true)}>${t("tesla.confirm.cancel")}</button>
+        <button type="button" class="go" @click=${this.confirmNow}>${t(`tesla.act.${open.verb}` as TranslationKey)}</button>
+      </span>
+      <span id="confirm-d" class="sr-only">${t("tesla.confirm.expires")}</span>
+      <span class="drain" aria-hidden="true"></span>
+    </div>`;
+  }
+
+  // Screen readers get Sending/Done politely and a failure as an alert. The regions stay in the page so the
+  // text change is announced.
+  private renderLive(): TemplateResult {
+    const msg = this.message();
+    const failed = msg?.phase === "failed";
+    return html`<div class="sr-only" role="status" aria-live="polite">${msg && !failed ? msg.text : ""}</div>
+      <div class="sr-only" role="alert">${failed ? msg.text : ""}</div>`;
+  }
+
+  // The tiles of a group, followed by the question or the result for that group.
+  private groupGrid(g: ControlGroup): TemplateResult | typeof nothing {
+    const keys = CONTROL_KEYS.filter((k) => CONTROLS[k].group === g && this.shownControls.includes(k));
+    if (!keys.length) return nothing;
+    return html`<div class="tiles">${keys.map((k) => this.renderTile(k))}${this.renderConfirmBar(g)}${this.renderNotice(g)}</div>`;
   }
 
   private banner(age: number | null): TemplateResult | typeof nothing {
@@ -773,6 +1074,7 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
     const shift = String(this.st("shift")?.state ?? "").toUpperCase();
     const level = `${pct === null ? "–" : `${formatNumber(hass, Math.round(pct))}%`}${range === null ? "" : ` · ${formatNumber(hass, Math.round(range))} ${this.unit("range", "km")}`}`;
     const carWake = canWake && !compact;
+    const wakeCmd = this.tracker.get("wake");
     const carWrap = html`<div
       class="car-wrap ${carWake ? "wakeable" : ""}"
       role=${carWake ? "button" : nothing}
@@ -781,8 +1083,8 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
       @keydown=${carWake ? this.key(() => this.onCar()) : nothing}
     >
       ${car}
-      ${this.armed === "wake-car"
-        ? html`<div class="overlay"><ha-icon icon="mdi:sleep-off"></ha-icon>${t("tesla.wake_confirm")}</div>`
+      ${wakeCmd
+        ? html`<div class="hint">${t(`tesla.cmd.value.${wakeCmd.phase}` as TranslationKey)}</div>`
         : carWake
           ? html`<div class="hint">${t("tesla.wake_hint")}</div>`
           : nothing}
@@ -821,22 +1123,16 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
       </ha-card>`;
     }
 
-    const controls = this.shownControls;
-    const group = (g: ControlGroup) =>
-      CONTROL_KEYS.filter((k) => CONTROLS[k].group === g && controls.includes(k)).map((k) => this.renderTile(k));
-    const tiles = (g: ControlGroup) => {
-      const list = group(g);
-      return list.length ? html`<div class="tiles">${list}</div>` : nothing;
-    };
     const section = (g: Exclude<ControlGroup, "climate">) => {
-      const list = group(g);
-      return list.length
-        ? html`<div class="section">
+      const grid = this.groupGrid(g);
+      return grid === nothing
+        ? nothing
+        : html`<div class="section">
             <yvz-section-title>${t(`tesla.group.${g}` as TranslationKey)}</yvz-section-title>
-            <div class="tiles">${list}</div>
-          </div>`
-        : nothing;
+            ${grid}
+          </div>`;
     };
+    const hasControls = this.shownControls.some((k) => !!this.st(k));
 
     return html`
       <ha-card data-state=${role ?? nothing}>
@@ -847,16 +1143,18 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
             : html`<div class="grid ${drive ? "driving" : ""}">
                 <div class="col">
                   <div class="hero">${carWrap} ${stats}</div>
-                  ${this.renderBattery(charging)} ${this.renderChips(chips)} ${drive ? nothing : this.renderLimit()}
+                  ${this.renderBattery(charging)} ${this.renderChips(chips)} ${this.renderNotice("top")} ${drive ? nothing : this.renderLimit()}
                 </div>
                 ${drive
                   ? nothing
                   : html`<div class="col">
-                      ${this.renderClimate(tiles("climate"))}
+                      ${this.asleep && hasControls ? html`<p class="sleep-note">${t("tesla.asleep_hint")}</p>` : nothing}
+                      ${this.renderClimate(this.groupGrid("climate"))}
                       ${CONTROL_GROUPS.filter((g) => g !== "climate").map((g) => section(g as Exclude<ControlGroup, "climate">))}
                     </div>`}
               </div>`}
         </div>
+        ${this.renderLive()}
       </ha-card>
     `;
   }
@@ -988,20 +1286,6 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
         transform: translateX(-50%);
       }
 
-      .overlay {
-        position: absolute;
-        inset: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: var(--yvz-space-2);
-        border-radius: var(--yvz-radius-md);
-        background: var(--yvz-error-soft);
-        color: var(--yvz-error-text);
-        font-size: var(--yvz-text-body);
-        font-weight: var(--yvz-weight-strong);
-      }
-
       .stats {
         flex: none;
         text-align: end;
@@ -1087,6 +1371,146 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
         line-height: var(--yvz-line-label);
       }
 
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+
+      .sleep-note {
+        display: flex;
+        align-items: center;
+        gap: var(--yvz-space-2);
+        margin: 0;
+        color: var(--yvz-text-muted);
+        font-size: var(--yvz-text-label);
+        line-height: var(--yvz-line-label);
+      }
+
+      /* the question under the tiles: soft error fill, a 2px ring and the tinted text, never white on red */
+      .confirm {
+        grid-column: 1 / -1;
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--yvz-space-2) var(--yvz-space-3);
+        padding: var(--yvz-space-3);
+        border-radius: var(--yvz-radius-md);
+        background: var(--yvz-state-soft);
+        box-shadow: inset 0 0 0 2px var(--yvz-state-text);
+        color: var(--yvz-state-text);
+        /* room for a sticky header or the bottom bar when it is scrolled into view */
+        scroll-margin-block: 72px;
+      }
+
+      .confirm .question {
+        flex: 1 1 auto;
+        font-size: var(--yvz-text-body);
+        font-weight: var(--yvz-weight-strong);
+      }
+
+      .confirm .actions {
+        display: flex;
+        gap: var(--yvz-space-2);
+        margin-inline-start: auto;
+      }
+
+      .confirm button {
+        min-width: 88px;
+        min-height: 44px;
+        padding: 0 var(--yvz-space-4);
+        border: 2px solid var(--yvz-state-text);
+        border-radius: var(--yvz-radius-md);
+        background: var(--yvz-surface);
+        color: var(--yvz-text);
+        font: inherit;
+        font-weight: var(--yvz-weight-medium);
+        cursor: pointer;
+      }
+
+      .confirm button.cancel {
+        border-color: color-mix(in srgb, var(--yvz-text) 60%, transparent);
+      }
+
+      .confirm button.go {
+        color: var(--yvz-state-text);
+      }
+
+      .confirm button:hover {
+        background: color-mix(in srgb, var(--yvz-surface) 88%, var(--yvz-text));
+      }
+
+      .confirm .drain {
+        position: absolute;
+        inset: auto 0 0 0;
+        height: 3px;
+        background: var(--yvz-state-text);
+        transform-origin: left;
+        animation: drain ${unsafeCSS(CONFIRM_MS)}ms linear forwards;
+      }
+
+      @keyframes drain {
+        from {
+          transform: scaleX(1);
+        }
+        to {
+          transform: scaleX(0);
+        }
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* the result of the last press, next to the tiles it came from */
+      .notice {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        gap: var(--yvz-space-2);
+        padding: var(--yvz-space-2) var(--yvz-space-3);
+        border-radius: var(--yvz-radius-md);
+        background: var(--yvz-state-soft);
+        color: var(--yvz-state-text);
+        font-size: var(--yvz-text-label);
+        font-weight: var(--yvz-weight-medium);
+        line-height: var(--yvz-line-label);
+      }
+
+      .notice ha-icon {
+        flex: none;
+        color: inherit;
+      }
+
+      .notice.sending ha-icon,
+      .notice.waking ha-icon,
+      .notice.slow ha-icon {
+        animation: spin 1.2s linear infinite;
+      }
+
+      .notice.slow ha-icon {
+        animation: none;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .confirm .drain,
+        .notice ha-icon {
+          animation: none;
+        }
+
+        .confirm .drain {
+          display: none;
+        }
+      }
+
       /* a group with fewer tiles than columns stretches them across the row instead of leaving holes */
       .tiles {
         --_cols: 4;
@@ -1100,6 +1524,9 @@ export class YvzTeslaCard extends YvzCard<TeslaCardConfig> {
         --yvz-tile-padding: var(--yvz-space-2) var(--yvz-space-3);
         --yvz-tile-value-size: var(--yvz-text-label);
         --yvz-tile-value-line: var(--yvz-line-label);
+        /* an unavailable or asleep tile keeps its text readable instead of fading out */
+        --yvz-tile-disabled-opacity: 1;
+        --yvz-tile-disabled-color: var(--yvz-text-muted);
       }
 
       /* compact: status only; car on the left, battery on the right, one column when narrow */
